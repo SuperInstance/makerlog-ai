@@ -18,11 +18,12 @@ This roadmap defines the path from current MVP to production-ready application. 
 ## Phase Overview
 
 ```
-Phase 1: Foundation (Weeks 1-4)     ████████████░░░░░░░░░░░░░░░
-Phase 2: Core Features (Weeks 5-12)  ░░░░░░░░░░░░████████████░░░░░░
-Phase 3: Production Ready (Weeks 13-20) ░░░░░░░░░░░░░░░░░░░░░████████
-Phase 4: Scale & Optimize (Weeks 21-28) ░░░░░░░░░░░░░░░░░░░░░░░░░░░████
-Phase 5: Launch (Weeks 29-32)       ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░██
+Phase 1: Foundation (Weeks 1-4)        ████████████░░░░░░░░░░░░░░░░░░░░░░░
+Phase 2: Core Features (Weeks 5-12)    ░░░░░░░░░░░░████████████░░░░░░░░░░░░
+Phase 2.5: Voice Enhancements (13-18)  ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░██
+Phase 3: Production Ready (Weeks 19-26) ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░████
+Phase 4: Scale & Optimize (Weeks 27-34) ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░████
+Phase 5: Launch (Weeks 35-38)          ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░██
 ```
 
 ---
@@ -177,22 +178,160 @@ POST /api/voice/transcribe
 
 ---
 
-## Phase 3: Production Ready (Weeks 13-20)
+## Phase 2.5: Voice Experience Enhancements (Weeks 13-18)
+
+### Goal: Implement emergent voice interaction patterns for natural, emotionally intelligent conversations
+
+**Research Document**: See `docs/EMERGENT-VOICE-PATTERNS.md` for comprehensive research and implementation details.
+
+### 2.5.1 Emotionally Responsive Voice (Weeks 13-14)
+**Owner**: Frontend/Backend Team
+**Complexity**: Medium
+**Estimated Cost**: Low (LLM-based) to Medium ($100-300/month for Hume AI)
+
+**Deliverables**:
+- [ ] LLM-based emotion inference from voice transcripts (tier 1)
+- [ ] TTS parameter adaptation based on detected emotion (pitch, rate, volume)
+- [ ] AI response tone adjustment based on emotional context
+- [ ] Emotion tracking dashboard in user profile
+- [ ] Optional Hume AI integration for advanced emotion detection (tier 2)
+
+**Acceptance Criteria**:
+- Detect 5 basic emotions: happy, sad, angry, frustrated, neutral
+- TTS voice adapts within 500ms of emotion detection
+- Response tone matches user emotional state
+- Emotion trends visible in user dashboard
+- Graceful fallback when emotion detection unavailable
+
+**API Endpoints**:
+```typescript
+POST /api/voice/emotion/analyze - Analyze emotion from transcript
+GET /api/user/emotion/trends - Get emotional trends over time
+POST /api/voice/tts/adapted - Get TTS with emotion adaptation
+```
+
+**Implementation Notes**:
+- Start with LLM-based inference using `@cf/meta/llama-3.1-8b-instruct`
+- Cache emotion results for repeated phrases (24h TTL)
+- Add privacy controls for emotional data storage
+- Allocate 5% of daily neuron quota for emotion features
+
+### 2.5.2 Voice Persona System (Weeks 15-16)
+**Owner**: Frontend Team
+**Complexity**: Medium
+**Estimated Cost**: Low (Web Speech API) to Medium ($50-200/month for ElevenLabs)
+
+**Deliverables**:
+- [ ] Persona management system with 3 default personas
+- [ ] Web Speech API voice parameter controls
+- [ ] Persona selection UI in settings
+- [ ] Custom persona creation interface
+- [ ] Voice preview functionality
+- [ ] Optional ElevenLabs integration for premium voices
+
+**Default Personas**:
+- **Professional Assistant**: Clear, concise, business-focused
+- **Motivational Coach**: Energetic, encouraging, celebrates wins
+- **Brief Assistant**: Minimal, efficient communication
+
+**Acceptance Criteria**:
+- Switch between personas in <1 second
+- Voice changes are consistent and recognizable
+- Custom personas can be created and saved
+- Voice preview available before selection
+- Fallback to default if voice unavailable
+
+**Database Schema**:
+```sql
+CREATE TABLE voice_personas (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  description TEXT,
+  voice_settings TEXT NOT NULL, -- JSON: {pitch, rate, volume, voiceURI}
+  personality_prompt TEXT,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE user_settings (
+  user_id TEXT PRIMARY KEY,
+  active_persona_id TEXT,
+  FOREIGN KEY (active_persona_id) REFERENCES voice_personas(id)
+);
+```
+
+**Implementation Notes**:
+- Use Web Speech API for tier 1 (no cost)
+- ElevenLabs integration for tier 2 (voice cloning, natural voices)
+- Store persona settings in D1 for persistence
+- Support per-conversation persona switching
+
+### 2.5.3 Full-Duplex Conversations (Weeks 17-18)
+**Owner**: Frontend/Backend Team
+**Complexity**: Medium-High
+**Estimated Cost**: Low (mostly client-side implementation)
+
+**Deliverables**:
+- [ ] WebRTC VAD integration for continuous monitoring
+- [ ] Barge-in detection and handling
+- [ ] Streaming audio pipeline (bidirectional)
+- [ ] Interruptible TTS with smooth cutoff
+- [ ] Conversation state management for full-duplex flow
+- [ ] Visual feedback for speaking/listening states
+
+**Acceptance Criteria**:
+- Detect user speech within 200ms
+- Interrupt AI response within 300ms
+- Smooth audio mixing without glitching
+- False interruption rate <10%
+- Works on mobile Safari and Chrome
+
+**Technical Stack**:
+- WebRTC VAD for voice activity detection
+- Web Audio API for audio processing and mixing
+- WebSocket for real-time signaling
+- MediaRecorder API for audio capture
+
+**Code Structure**:
+```typescript
+// src/utils/voice-activity-detector.ts
+class ConversationManager {
+  vad: VAD;
+  isSpeaking: boolean;
+  aiSpeaking: boolean;
+
+  async initialize()
+  async processAudioStream(stream: MediaStream)
+  handleUserStart()
+  handleUserStop()
+  stopAIResponse()
+}
+```
+
+**Implementation Notes**:
+- Test with various background noise levels
+- Implement graceful degradation on poor connections
+- Add battery optimization for mobile
+- Consider native app for optimal performance
+
+---
+
+## Phase 3: Production Ready (Weeks 19-26)
 
 ### Goal: Achieve production-grade reliability and accessibility
 
-### 3.1 Accessibility Compliance (Weeks 13-16)
+### 3.1 Accessibility Compliance (Weeks 19-22)
 **Owner**: Frontend Team
 **Target**: WCAG 2.2 Level AA
 
-**Week 13-14: Multi-Modal Interface**:
+**Week 19-20: Multi-Modal Interface**:
 - [ ] Real-time captioning for all voice content (< 2s delay)
 - [ ] Visual waveform for voice activity
 - [ ] Haptic feedback patterns (configurable intensity)
 - [ ] TTS playback controls (rate 0.5x-2x, volume, voice selection)
 - [ ] Always-visible text input alternative
 
-**Week 15-16: Advanced Accessibility**:
+**Week 21-22: Advanced Accessibility**:
 - [ ] Full transcript generation and search
 - [ ] Export transcripts (TXT, JSON, SRT)
 - [ ] Sign language avatar integration (MVP)
@@ -206,7 +345,7 @@ POST /api/voice/transcribe
 - Keyboard-only navigation testing
 - Color contrast validation
 
-### 3.2 Performance Optimization (Weeks 17-18)
+### 3.2 Performance Optimization (Weeks 23-24)
 **Owner**: Backend Team
 **Deliverables**:
 - [ ] AI Gateway caching configuration
@@ -222,7 +361,7 @@ POST /api/voice/transcribe
 - P99 latency: < 25s (all models)
 - Cache hit rate: > 30%
 
-### 3.3 Security Hardening (Week 19)
+### 3.3 Security Hardening (Week 25)
 **Owner**: Security Team
 **Deliverables**:
 - [ ] Security audit (external or internal)
@@ -232,7 +371,7 @@ POST /api/voice/transcribe
 - [ ] DDoS protection (Cloudflare Spectrum)
 - [ ] Bot detection and mitigation
 
-### 3.4 Compliance & Privacy (Week 20)
+### 3.4 Compliance & Privacy (Week 26)
 **Owner**: Legal/Security Team
 **Deliverables**:
 - [ ] GDPR compliance checklist
@@ -245,11 +384,11 @@ POST /api/voice/transcribe
 
 ---
 
-## Phase 4: Scale & Optimize (Weeks 21-28)
+## Phase 4: Scale & Optimize (Weeks 27-34)
 
 ### Goal: Prepare for production scale and launch
 
-### 4.1 Database Optimization (Weeks 21-22)
+### 4.1 Database Optimization (Weeks 27-28)
 **Owner**: Backend Team
 **Deliverables**:
 - [ ] D1 query optimization with proper indexes
@@ -266,7 +405,7 @@ CREATE INDEX idx_tasks_status_priority ON tasks(status, priority, created_at);
 CREATE INDEX idx_vector_search ON embeddings USING vector(embedding);
 ```
 
-### 4.2 Geographic Distribution (Week 23)
+### 4.2 Geographic Distribution (Week 29)
 **Owner**: DevOps Team
 **Deliverables**:
 - [ ] Edge-aware request routing
@@ -274,7 +413,7 @@ CREATE INDEX idx_vector_search ON embeddings USING vector(embedding);
 - [ ] CDN configuration for global performance
 - [ ] Regional data residency compliance
 
-### 4.3 Load Testing & Capacity Planning (Weeks 24-25)
+### 4.3 Load Testing & Capacity Planning (Weeks 30-31)
 **Owner**: DevOps Team
 **Deliverables**:
 - [ ] Load test infrastructure (k6 or Artillery)
@@ -289,7 +428,7 @@ CREATE INDEX idx_vector_search ON embeddings USING vector(embedding);
 - Spike test (10x normal traffic)
 - Failure injection (model timeout, rate limit)
 
-### 4.4 Documentation & Runbooks (Weeks 26-27)
+### 4.4 Documentation & Runbooks (Weeks 32-33)
 **Owner**: DevOps Team
 **Deliverables**:
 - [ ] API documentation (OpenAPI/Swagger)
@@ -299,7 +438,7 @@ CREATE INDEX idx_vector_search ON embeddings USING vector(embedding);
 - [ ] Troubleshooting guide
 - [ ] Architecture decision records (ADRs)
 
-### 4.5 Beta Testing (Week 28)
+### 4.5 Beta Testing (Week 34)
 **Owner**: Product Team
 **Deliverables**:
 - [ ] Closed beta with 50-100 users
@@ -310,11 +449,11 @@ CREATE INDEX idx_vector_search ON embeddings USING vector(embedding);
 
 ---
 
-## Phase 5: Launch (Weeks 29-32)
+## Phase 5: Launch (Weeks 35-38)
 
 ### Goal: Production deployment and public launch
 
-### 5.1 Pre-Launch Checklist (Week 29)
+### 5.1 Pre-Launch Checklist (Week 35)
 **Owner**: All Teams
 
 **Technical**:
@@ -341,19 +480,19 @@ CREATE INDEX idx_vector_search ON embeddings USING vector(embedding);
 ### 5.2 Staged Rollout (Weeks 30-31)
 **Owner**: DevOps Team
 
-**Week 30: Limited Access**:
+**Week 36: Limited Access**:
 - [ ] Deploy to production (makerlog.ai)
 - [ ] Enable for team members only
 - [ ] Monitor metrics and errors
 - [ ] Fix any critical issues
 
-**Week 31: Beta Launch**:
+**Week 37: Beta Launch**:
 - [ ] Open to waitlist (100-500 users)
 - [ ] Monitor load and performance
 - [ ] Collect feedback
 - [ ] Iterate on issues
 
-### 5.3 Public Launch (Week 32)
+### 5.3 Public Launch (Week 38)
 **Owner**: Product/Marketing Team
 
 **Launch Day**:
