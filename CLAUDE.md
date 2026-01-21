@@ -2,144 +2,168 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Table of Contents
+
+- [Project Overview](#project-overview)
+- [Quick Start](#quick-start)
+- [Essential Reference Docs](#essential-reference-docs)
+- [Development Commands](#development-commands)
+- [Architecture](#architecture)
+- [Key Files](#key-files)
+
+---
+
 ## Project Overview
 
-Makerlog.ai is a voice-first development assistant that gamifies Cloudflare free tier quota harvesting. Users talk through ideas during the day, and the system automatically detects generative opportunities (like generating code snippets, images, or text) that execute overnight using unused free tier credits.
+**Makerlog.ai** is a voice-first development assistant that gamifies Cloudflare free tier quota harvesting. Users talk through ideas during the day, and the system automatically detects generative opportunities (code snippets, images, text) that execute overnight using unused free tier credits.
 
-## Architecture
+**Tech Stack:**
+- Frontend: React 18, TypeScript, Vite, Tailwind CSS
+- Backend: Cloudflare Workers (Hono framework)
+- Database: D1 (SQLite), Vectorize (vector search), R2 (storage), KV (cache)
+- AI: Cloudflare Workers AI (Whisper, Llama, BGE embeddings)
 
-The application follows a serverless architecture with two main components:
+---
 
-1. **React Frontend** (`/src/`) - Voice UI built with Vite, React 18, and Tailwind CSS
-2. **Cloudflare Worker API** (`/workers/api/`) - Hono-based server handling all business logic
+## Quick Start
 
-### Technology Stack
-- **Frontend**: React 18.2.0, TypeScript, Vite, Tailwind CSS
-- **Backend**: Cloudflare Workers with Hono framework
-- **Database**: Cloudflare D1 (SQLite)
-- **AI Services**: Cloudflare Workers AI (Whisper, Llama, BGE embeddings)
-- **Search**: Cloudflare Vectorize for semantic search
-- **Storage**: Cloudflare R2 for assets, KV for caching
+```bash
+# Install dependencies
+npm install
+
+# Start frontend (localhost:5173)
+npm run dev
+
+# Start worker API (localhost:8787) - in another terminal
+npm run api:dev
+
+# Run tests
+npm run test
+
+# Deploy everything
+npm run deploy:all
+```
+
+**Before development:**
+1. Install Wrangler CLI: `npm install -g wrangler`
+2. Login: `wrangler login`
+3. Create resources: `wrangler d1 create makerlog-db` and `wrangler vectorize create makerlog-conversations --dimensions=768 --metric=cosine`
+
+---
+
+## Essential Reference Docs
+
+For detailed implementation guidance, patterns, and research, see:
+
+| Topic | Document |
+|-------|----------|
+| **Getting Started** | `docs/ONBOARDING.md` |
+| **AI Agent Architecture** | `docs/EMERGENT-AGENT-ARCHITECTURES.md` |
+| **Voice Features** | `docs/EMERGENT-VOICE-PATTERNS.md` |
+| **Mobile Development** | `docs/MOBILE-DEVELOPMENT-PATTERNS.md` |
+| **Edge Computing** | `docs/EDGE-COMPUTING-PATTERNS.md` |
+| **Performance Optimization** | `docs/PERFORMANCE-OPTIMIZATION.md` |
+| **Analytics & Monitoring** | `docs/ANALYTICS-OBSERVABILITY.md` |
+| **CI/CD Pipeline** | `docs/CICD-AUTOMATION-PATTERNS.md`, `docs/CICD-SETUP-GUIDE.md` |
+| **Gamification** | `docs/GAMIFICATION-PATTERNS.md` |
+
+---
 
 ## Development Commands
 
-### Frontend Development
+### Frontend
 ```bash
 npm run dev          # Start Vite dev server (localhost:5173)
 npm run build        # Build for production
 npm run preview      # Preview production build
 ```
 
-### Worker Development
+### Worker API
 ```bash
-cd workers/api
-npm run dev          # Start Wrangler dev server (localhost:8787)
-npm run deploy       # Deploy to production
-npm run deploy:prod  # Deploy to production environment
-npm run tail         # View logs in real-time
+npm run api:dev      # Start Wrangler dev server (localhost:8787)
+npm run deploy       # Deploy to development
+npm run deploy:prod  # Deploy to production
+npm run tail         # View real-time logs
 ```
 
-### Full Stack Development
+### Testing
 ```bash
-npm run api:dev      # Start worker API in development (from root)
+npm run test              # Run all tests
+npm run test:ui           # Vitest UI mode
+npm run test:coverage     # Coverage report
+npm run test:e2e          # Playwright E2E tests
 ```
 
-### Database Operations
+### Database
 ```bash
-npm run db:migrate  # Execute database migrations
+npm run db:migrate        # Execute migrations
+npm run db:migrate:test   # Set up test database
 ```
 
-### Deployment
-```bash
-npm run deploy:all  # Build frontend + deploy worker + deploy pages
+---
+
+## Architecture
+
+```
+makerlog-ai/
+├── src/                    # React frontend
+│   ├── VoiceChat.tsx       # Main voice interface
+│   ├── Dashboard.tsx       # Quota tracking & tasks
+│   └── main.tsx            # App entry point
+├── workers/api/            # Cloudflare Worker (Hono)
+│   └── src/
+│       ├── routes/         # API endpoints
+│       ├── agents/         # AI agent system
+│       └── middleware/     # Request processing
+├── schema/                 # D1 database migrations
+├── docs/                   # Detailed documentation
+└── .github/workflows/      # CI/CD pipelines
 ```
 
-## Key API Endpoints
+### Key API Endpoints
 
-### Voice Processing Pipeline
-- `POST /api/voice/transcribe` - Complete voice processing: upload → transcribe → AI response → store
+| Endpoint | Purpose |
+|----------|---------|
+| `POST /api/voice/transcribe` | Voice processing pipeline |
+| `GET/POST /api/conversations` | Conversation management |
+| `POST /api/search` | Semantic vector search |
+| `GET /api/opportunities` | List detected generative tasks |
+| `POST /api/harvest` | Execute all queued tasks |
+| `GET /api/quota` | Real-time quota tracking |
 
-### Conversation Management
-- `GET/POST /api/conversations` - List/create conversations
-- `GET /api/conversations/:id` - Get conversation with messages
-- `POST /api/search` - Semantic search using vector embeddings
+---
 
-### Opportunity Detection
-- `GET /api/opportunities` - List detected generative tasks
-- `POST /api/opportunities/:id/queue` - Queue opportunity for generation
-- `POST /api/opportunities/:id/refine` - Edit prompt before queueing
-- `POST /api/opportunities/:id/reject` - Skip opportunity
+## Key Files
 
-### Task Execution
-- `GET /api/tasks` - List all queued tasks
-- `POST /api/tasks` - Create manual task
-- `POST /api/harvest` - Execute all queued tasks (quota optimization)
-- `GET /api/quota` - Real-time quota usage tracking
-- `GET /api/digest` - Daily summary
+### Configuration
+- `wrangler.toml` - Worker deployment config (bindings, env vars)
+- `vite.config.ts` - Frontend build config
+- `package.json` - Scripts and dependencies
 
-## Configuration
-
-### Frontend Proxy
-Vite is configured to proxy API calls to the worker dev server (`/api/*` → `http://localhost:8787`).
-
-### Worker Configuration
-The worker uses Wrangler with bindings for:
+### Worker Bindings (wrangler.toml)
 - `AI` - Cloudflare AI services
 - `DB` - D1 database (makerlog-db)
 - `ASSETS` - R2 bucket for files
 - `KV` - Cache namespace
 - `VECTORIZE` - Semantic search index
 
-### Environment Variables
-Set in `wrangler.toml`:
-- `ENVIRONMENT` - "development" or "production"
+### Database Schema
+Key tables: `users`, `conversations`, `messages`, `tasks`, `opportunities`, `achievements`
 
-## Database Schema
-
-Key tables (based on API usage):
-- `users` - XP, level, streak tracking
-- `conversations` - Conversation metadata
-- `messages` - Audio + text with vector embeddings
-- `tasks` - Queued generative tasks
-- `opportunities` - Detected generation opportunities
-- `achievements` - User achievement unlocks
-
-## Frontend Components
-
-### Core Views
-- `src/main.tsx` - App entry point with bottom navigation
-- `src/VoiceChat.tsx` - Main voice interface with push-to-talk recording
-- `src/Dashboard.tsx` - Quota tracking and task management
-
-### Key Features
-- Push-to-talk recording with visual feedback
-- Real-time transcription and AI responses
-- Conversation history sidebar
-- Opportunity detection panel
-- Achievement system with XP/levels
-- Batch task execution with quota optimization
-
-## Cloudflare Setup Requirements
-
-Before development:
-1. Install Wrangler CLI: `npm install -g wrangler`
-2. Login: `wrangler login`
-3. Create Vectorize index: `wrangler vectorize create makerlog-conversations --dimensions=768 --metric=cosine`
-4. Create D1 database: `wrangler d1 create makerlog-db`
+---
 
 ## Code Patterns
 
 ### Worker API Structure
 - Hono router with `/api` prefix
 - Zod validation for request/response schemas
+- Parameterized D1 queries
 - Consistent error handling with HTTP status codes
-- Database queries use parameterized statements
 
 ### Frontend Patterns
 - Functional components with TypeScript
 - Tailwind CSS for styling
-- Vite for fast development builds
-- Push-to-talk recording using MediaRecorder API
+- Push-to-talk recording via MediaRecorder API
 
 ### Audio Processing Flow
 1. Record audio → WebM blob
@@ -149,698 +173,82 @@ Before development:
 5. Create embeddings with BGE → Vector
 6. Store in D1 + add to Vectorize index
 
+---
+
 ## Testing
 
-**Recommended Testing Stack:**
-- **Frontend Unit Tests**: Vitest + React Testing Library
-- **Worker Unit Tests**: Vitest + @cloudflare/vitest-pool-workers
-- **Integration Tests**: Miniflare + Wrangler Dev for local D1/R2/AI testing
-- **E2E Tests**: Playwright (native Workers support)
-- **AI Mocking**: MSW (Mock Service Worker) for network-level interception
+**Stack:** Vitest + React Testing Library + Playwright + MSW (for AI mocking)
 
-**Test Commands:**
-```bash
-npm run test              # Run all tests with Vitest
-npm run test:ui           # Vitest UI mode
-npm run test:coverage     # Coverage report
-npm run test:unit         # Frontend unit tests only
-npm run test:worker       # Worker unit tests only
-npm run test:e2e          # Playwright E2E tests
-npm run db:migrate:test   # Set up test D1 database
-```
+**Strategy:**
+- Mock AI responses with MSW (no quota consumption)
+- Use real bindings in integration tests via `@cloudflare/vitest-pool-workers`
+- Database seed files for consistent test data
 
-**Testing Strategy:**
-- Test AI-dependent code with mocked responses (MSW)
-- Use real bindings in integration tests via @cloudflare/vitest-pool-workers
-- Implement database seed files for consistent test data
-- Mock external dependencies (AI models, R2 uploads)
-- Test error handling and retry logic with fault injection
+---
 
-## Deployment Notes
+## Deployment
 
-- Frontend deploys to Cloudflare Pages via `wrangler pages deploy`
-- Worker deploys independently via `wrangler deploy`
-- Database migrations require manual execution
-- Vectorize index must be created before deployment
+- **Frontend:** Cloudflare Pages (`wrangler pages deploy`)
+- **Worker:** Cloudflare Workers (`wrangler deploy`)
+- **Environments:** development, staging, production
+- **CI/CD:** GitHub Actions (see `docs/CICD-AUTOMATION-PATTERNS.md`)
 
-## CI/CD Pipeline
+---
 
-### GitHub Actions Workflows
+## Agent System
 
-Makerlog.ai uses GitHub Actions for automated CI/CD:
+Makerlog.ai uses a multi-agent architecture for Cloudflare Workers edge environment:
 
-**Main Workflows**:
-- `.github/workflows/ci.yml` - Continuous integration (lint, test, build)
-- `.github/workflows/deploy.yml` - Automated deployments
-- `.github/workflows/test.yml` - Scheduled and manual test runs
+**Agent Types:**
+- **Opportunity Detection Swarm** - Parallel specialist agents (code, image, text, research)
+- **ReAct Reasoning** - Thought → Action → Observation loops
+- **Hierarchical Task Planner** - BabyAGI-inspired decomposition
+- **Reflective Learning** - Experience storage + few-shot learning
+- **Event-Driven Pipeline** - Async D1 queue communication
 
-**CI Pipeline Stages**:
-1. **Validation**: Linting (ESLint), type checking (TypeScript), formatting (Prettier)
-2. **Testing**: Unit tests (Vitest), integration tests, E2E tests (Playwright)
-3. **Security**: Dependency audit, vulnerability scanning
-4. **Build**: Frontend build, worker bundle verification
+**Constraints:** Stateless, <25s per task, 128MB memory, aggressive KV caching (24h TTL)
 
-**Deployment Pipeline**:
-- **Preview**: Automatic for every PR
-- **Staging**: On push to `develop` branch
-- **Production**: On push to `main` branch (with smoke tests)
+See `docs/EMERGENT-AGENT-ARCHITECTURES.md` for complete details.
 
-**Quality Gates**:
-- All tests must pass before merge
-- Code coverage thresholds: 80% lines, 80% functions, 75% branches
-- TypeScript strict mode enforced
-- ESLint and Prettier checks required
-- Worker bundle size < 1MB
+---
 
-### Cloudflare Deployment Commands
+## Gamification
 
-```bash
-# Frontend deployment
-npm run build
-wrangler pages deploy dist --project-name makerlog-dashboard
+**Current Features:** XP/leveling, streak tracking, achievements (First Harvest, Perfect Day, Week Warrior, etc.)
 
-# Worker deployment
-cd workers/api
-wrangler deploy                    # Development
-wrangler deploy --env staging      # Staging
-wrangler deploy --env production   # Production
+**Philosophy:** Developer-focused (mastery, autonomy, efficiency) not childish rewards. Quality over quantity. Anti-burnout with streak forgiveness.
 
-# Database migrations
-wrangler d1 execute makerlog-db --file=./schema/migrations/001_initial.sql
+See `docs/GAMIFICATION-PATTERNS.md` for design principles and roadmap.
 
-# Environment-specific operations
-wrangler d1 execute makerlog-db --command="SELECT * FROM users" --env production
-```
-
-### Environment Variables
-
-**Required GitHub Secrets**:
-- `CLOUDFLARE_API_TOKEN` - Cloudflare API token for deployments
-- `CLOUDFLARE_ACCOUNT_ID` - Your Cloudflare account ID
-
-**Optional**:
-- `SLACK_WEBHOOK_URL` - For deployment notifications
-- `DISCORD_WEBHOOK_URL` - For deployment notifications
-
-**Environment Configuration**:
-- **Development**: Local (wrangler dev), mock AI services
-- **Preview**: PR deployments, isolated database, real AI with quotas
-- **Staging**: develop branch, staging database, full AI quota
-- **Production**: main branch, production database, full AI quota
-
-### Deployment Safety
-
-**Pre-deployment Checks**:
-- All tests passing (unit, integration, E2E)
-- Code coverage thresholds met
-- Security scan clean
-- No pending database migrations (or manual approval required)
-
-**Post-deployment Verification**:
-- Automated smoke tests
-- Health check endpoint verification
-- Error rate monitoring (alert if >5%)
-- Automatic rollback on critical failures
-
-**Rollback Procedures**:
-```bash
-# Worker rollback
-wrangler rollback <deployment-id> --env production
-
-# Pages rollback
-wrangler pages deployment rollback <deployment-id> --project-name makerlog-dashboard
-
-# Database rollback
-wrangler d1 backups restore makerlog-db <backup-id> --env production
-```
-
-### Testing in CI/CD
-
-**AI Service Mocking**:
-- Use MSW (Mock Service Worker) to mock AI responses in tests
-- Test AI-dependent code without consuming quota
-- Validate request/response schemas
-
-**Voice Feature Testing**:
-- Mock MediaRecorder API for audio recording tests
-- Test audio processing with sample files
-- Verify transcription and TTS functionality
-
-**Performance Testing**:
-- Bundle size checks on every build
-- Load tests for API endpoints
-- Latency thresholds (P50 < 2s, P95 < 10s, P99 < 25s)
-
-### Monitoring & Alerting
-
-**Key Metrics**:
-- Error rate (alert if >5% warning, >10% critical)
-- Response latency (P95 > 10s warning, >15s critical)
-- Neuron quota usage (alert at 80%, critical at 95%)
-- Worker CPU time usage
-
-**Health Checks**:
-- `/health` - Basic health status
-- `/health/ready` - Readiness probe (checks all dependencies)
-- `/health/live` - Liveness probe
-
-**Dashboard Requirements**:
-- Real-time request volume and error rate
-- Neuron usage per model
-- P50/P95/P99 latency by endpoint
-- Cache hit rates
-- Active users and conversations
-
-### CI/CD Best Practices
-
-1. **Always test before deploying**: Run full test suite before production deployment
-2. **Use preview deployments**: Test critical flows in preview before merging
-3. **Monitor everything**: Track deployment success rate, error rates, latency
-4. **Automate rollbacks**: Auto-rollback on health check failure
-5. **Secure credentials**: Use GitHub Actions secrets, never commit keys
-
-For comprehensive CI/CD patterns and configurations, see `docs/CICD-AUTOMATION-PATTERNS.md`.
+---
 
 ## Production Readiness
 
-### Error Handling
-- **Retry Logic**: Exponential backoff with jitter for transient failures
-- **Circuit Breaker**: Prevent cascading failures from AI model errors
-- **Graceful Degradation**: Fallback responses when AI services unavailable
-- **Timeout Management**: Configurable timeouts per AI model type
+**Error Handling:** Exponential backoff, circuit breakers, graceful degradation
 
-### Security
-- **Input Validation**: Comprehensive validation for all AI inputs
-- **Content Moderation**: Llama Guard 3 for unsafe content detection
-- **Rate Limiting**: Per-user and per-IP limits via Cloudflare Rate Limiter
-- **Prompt Injection Protection**: Firewall for AI rules
+**Security:** Input validation, Llama Guard 3 content moderation, rate limiting, prompt injection protection
 
-### Monitoring & Analytics
-- **Workers Observability**: OpenTelemetry integration for traces and metrics
-- **Custom Metrics**: Track AI requests, errors, latency, neuron usage
-- **Alerting**: Critical alerts for quota thresholds, error rates, latency
-- **Logging**: Structured JSON logs for all AI operations
+**Monitoring:** Workers Analytics (built-in), Sentry (recommended), custom metrics
 
-**Privacy-First Analytics Philosophy**:
-- See `docs/ANALYTICS-OBSERVABILITY.md` for comprehensive analytics strategy
-- **Core Principle**: Measure success without storing user voice data
-- **Essential Metrics**: System health, AI performance, feature usage (aggregate only)
-- **Valuable Metrics**: Voice adoption rate, opportunity accuracy, task completion (anonymized)
-- **Prohibited**: Voice recordings for analytics, user identity without consent, cross-site tracking
-- **Compliance**: GDPR and EU AI Act compliant (August 2026 deadline)
+**Privacy-First Analytics:** See `docs/ANALYTICS-OBSERVABILITY.md` for GDPR/EU AI Act compliant strategy
 
-**Key Analytics Guidelines**:
-1. **Data Minimization**: Collect minimum data necessary for analytics goals
-2. **Aggregate Metrics**: Report averages, distributions, not individual data
-3. **Differential Privacy**: Add mathematical noise to prevent reverse-engineering
-4. **Consent Management**: Granular opt-in for non-essential analytics
-5. **User Control**: Users can view/export/delete their own data
+---
 
-**15 Essential Metrics** (from Analytics Strategy):
-1. Request Latency (P50, P95, P99) - Target: P95 < 2s
-2. Error Rate by Endpoint - Target: < 0.1%
-3. AI Model Success Rate - Target: > 98%
-4. Quota Utilization Rate - Target: > 70%
-5. Cache Hit Rate - Target: > 30%
-6. Voice Adoption Rate - Target: > 80%
-7. Opportunity Acceptance Rate - Target: > 60%
-8. Task Completion Rate - Target: > 90%
-9. Streak Engagement - Target: > 30% with 7+ day streaks
-10. DAU/MAU Stickiness - Target: > 20%
-11. Transcription Accuracy (user-reported) - Target: > 95%
-12. Opportunity Detection Precision - Target: > 70%
-13. Response Time by AI Model - Target: P95 < 5s
-14. Quota Cost per Task Type - Understand cost structure
-15. Agent Performance (when implemented) - Target: > 90% success
+## Performance
 
-**Tool Recommendations**:
-- **System Health**: Cloudflare Workers Analytics (built-in, free)
-- **Web Traffic**: Cloudflare Web Analytics (privacy-first, no cookies)
-- **Error Tracking**: Sentry (configurable data scrubbing)
-- **Custom Analytics**: D1-based user metrics (user-controlled)
-- **Avoid**: Google Analytics, Mixpanel (default), FullStory, LogRocket
+**Targets:**
+- Frontend: LCP <2.5s, TTI <3.5s
+- Backend (cached): P95 <200ms
+- Backend (AI): P95 <8s
+- Cache hit rate: >30%
+- Neuron reduction: 40-50% through optimization
 
-**Implementation Resources**:
-```typescript
-// Enable Workers Analytics in wrangler.toml
-[observability]
-enabled = true
-head_sampling_rate = 1
+See `docs/PERFORMANCE-OPTIMIZATION.md` for comprehensive strategies, code examples, and monitoring setup.
 
-// Enable AI Gateway metrics
-[ai]
-gateway = {
-  id = "makerlog-gateway",
-  metrics = ["latency", "neurons", "errors"]
-}
-
-// Custom metrics in Workers
-await env.CF_ANALYTICS?.writeDataPoint({
-  blobs: ['voice_transcribe', 'success'],
-  doubles: [duration_ms],
-  indexes: ['api_endpoint_latency']
-});
-```
-
-### Cost Management
-- **Daily Quota Tracking**: Monitor neuron usage with alerts at 80%/95%
-- **Smart Caching**: AI Gateway cache with appropriate TTLs
-- **Model Selection**: Use smaller models when appropriate
-
-### Accessibility (WCAG 2.2 Level AA)
-- **Multi-Modal Design**: Text/visual/haptic alternatives to voice-only
-- **Real-Time Captioning**: Live captions for voice content (< 2s delay)
-- **Screen Reader Support**: Full keyboard navigation and ARIA labels
-- **Audio Control**: User-controllable TTS playback with volume/rate controls
-
-## AI Agent Architecture
-
-### Agent Design Principles
-
-Makerlog.ai employs a multi-agent architecture designed specifically for Cloudflare Workers' edge environment. Key principles:
-
-1. **Stateless Operation**: Agents maintain no in-memory state between invocations
-2. **Async Communication**: Agents communicate via D1 queues, not direct calls
-3. **Task Granularity**: Every agent task must complete in <25 seconds (buffer for overhead)
-4. **Parallel Execution**: Leverage Promise.all for concurrent agent operations
-5. **Edge Caching**: Aggressive KV cache usage for shared context (24h TTL)
-
-### Agent Types
-
-#### Opportunity Detection Swarm
-**Location**: `workers/api/src/agents/swarm/`
-
-Four specialist agents analyze conversations in parallel:
-- **Code Specialist**: Detects component/API generation opportunities
-- **Image Specialist**: Identifies visual asset needs (icons, mockups)
-- **Text Specialist**: Finds copy/documentation opportunities
-- **Research Specialist**: Suggestes information gathering tasks
-
-**Usage**:
-```typescript
-import { swarmAnalyze } from '../agents/swarm/consolidation';
-
-const opportunities = await swarmAnalyze(env, conversationId, messageContent);
-```
-
-#### ReAct Reasoning Agent
-**Location**: `workers/api/src/agents/react-agent.ts`
-
-Interleaves reasoning and acting for complex queries:
-1. **Thought**: Analyzes current context
-2. **Action**: Uses tools (search, quota check, cost estimation)
-3. **Observation**: Processes tool results
-4. **Iteration**: Repeats until final answer
-
-**Tools Available**:
-- `search_conversations` - Vectorize semantic search
-- `get_quota` - Current neuron usage
-- `estimate_cost` - Task cost prediction
-
-**Usage**:
-```typescript
-import { reactAgent } from '../agents/react-agent';
-
-const result = await reactAgent(env, userId, query, maxIterations);
-```
-
-#### Hierarchical Task Planner
-**Location**: `workers/api/src/agents/hierarchical/`
-
-BabyAGI-inspired decomposition of complex requests:
-1. **Planning Phase**: Break request into subtasks with dependencies
-2. **Validation**: Check if plan fits within quota
-3. **Execution**: Execute tasks in topological order
-4. **Tracking**: Monitor progress and handle failures
-
-**Usage**:
-```typescript
-import { planAndExecute } from '../agents/hierarchical/task-planner';
-
-const result = await planAndExecute(env, userId, "Create a complete landing page");
-```
-
-#### Reflective Learning Agent
-**Location**: `workers/api/src/agents/reflective/`
-
-Self-improving agent that learns from experience:
-1. **Experience Storage**: Stores high-quality outputs in D1 + Vectorize
-2. **Few-Shot Learning**: Retrieves similar examples for new tasks
-3. **Quality Evaluation**: Self-assesses output quality
-4. **Continuous Improvement**: Builds knowledge base over time
-
-**Usage**:
-```typescript
-import { reflectiveGenerate } from '../agents/reflective/few-shot-learner';
-
-const output = await reflectiveGenerate(env, userId, 'code', prompt);
-```
-
-#### Event-Driven Pipeline
-**Location**: `workers/api/src/agents/events/`
-
-Agents respond to system events asynchronously:
-- `new_message` → Opportunity detection swarm
-- `quota_threshold` → Harvest scheduling
-- `task_completed` → XP awarding + learning
-- `midnight` → Batch execution
-
-**Usage**:
-```typescript
-import { publishEvent } from '../agents/events/publisher';
-
-await publishEvent(env, 'new_message', { message, conversationId });
-```
-
-### Agent Constraints
-
-**Per-Request Limits**:
-- CPU Time: 30 seconds (hard limit)
-- Memory: 128MB
-- AI Calls: Plan for 3-5 calls max per request
-
-**Neuron Budgeting**:
-- Single LLM call (1000 tokens): ~1 neuron
-- Swarm (4 parallel calls): ~4-5 neurons
-- ReAct (3 sequential): ~3-8 neurons
-- Daily free tier: 10,000 neurons
-
-**Cost Optimization**:
-- Cache embeddings in KV (24h TTL)
-- Use confidence thresholds (>70%) before AI calls
-- Batch small tasks into single requests
-- Implement circuit breakers for failing agents
-
-### Agent Development Guidelines
-
-When creating new agents:
-
-1. **Define Agent Interface**:
-```typescript
-interface Agent {
-  name: string;
-  description: string;
-  execute: (input: any, env: Env) => Promise<any>;
-  estimateCost: (input: any) => number;
-}
-```
-
-2. **Add Error Handling**:
-```typescript
-try {
-  const result = await agent.execute(input, env);
-  return result;
-} catch (error) {
-  // Log to Workers Analytics
-  // Return graceful fallback
-  // Trigger circuit breaker if failing
-}
-```
-
-3. **Include Metrics**:
-```typescript
-await env.AI.run(model, input, {
-  gateway: {
-    id: 'makerlog-gateway',
-    metrics: ['latency', 'neurons', 'errors'],
-  },
-});
-```
-
-4. **Test with Mocked AI**:
-```typescript
-// Use MSW to mock AI responses in tests
-const mockAI = {
-  run: vi.fn().mockResolvedValue({ response: 'test' });
-};
-```
-
-### Agent Roadmap
-
-**Phase 1** (Current): Single-agent enhancement
-- Basic opportunity detection
-- ReAct reasoning for complex queries
-
-**Phase 2**: Specialist agent swarm
-- Parallel opportunity detection
-- Specialist consolidation
-
-**Phase 3**: Hierarchical planning
-- Task decomposition
-- Dependency resolution
-
-**Phase 4**: Reflection & learning
-- Experience storage
-- Few-shot learning
-
-**Phase 5**: Production multi-agent system
-- Full orchestration framework
-- Monitoring & observability
-
-See `docs/EMERGENT-AGENT-ARCHITECTURES.md` for complete research and implementation details.
-
-## Voice Features & Emerging Patterns
-
-### Current Voice Capabilities
-- Push-to-talk recording with MediaRecorder API
-- Whisper-based transcription via Cloudflare Workers AI
-- Web Speech API for text-to-speech responses
-- Real-time conversation streaming
-- Voice-activated opportunity detection
-
-### Emerging Voice Patterns (2025-2026)
-
-**Research Document**: See `docs/EMERGENT-VOICE-PATTERNS.md` for comprehensive research on voice interaction patterns, technologies, and implementation guides.
-
-## Edge Computing Patterns
-
-**Research Document**: See `docs/EDGE-COMPUTING-PATTERNS.md` for comprehensive research on edge computing optimization patterns for Cloudflare Workers.
-
-**Key Patterns Identified**:
-
-1. **Request Coalescing & Batching** - Combine similar requests within a time window to batch AI calls, reducing quota by 40-60%
-2. **Multi-Layer Edge Caching** - Hierarchical caching across KV, CDN, and browser with content-specific TTLs
-3. **Geographic Distribution Optimization** - Smart routing based on user location with region-aware model selection
-4. **Edge Function Composition** - Break complex workflows into composable functions with continuation patterns for timeouts
-5. **Streaming Response Pattern** - Stream AI responses and task updates via SSE for better UX
-6. **Durable Objects for Stateful Operations** - Real-time features like live quota tracking and collaborative opportunity review
-7. **Cold Start Mitigation** - Keep workers warm with scheduled pings to reduce first-request latency
-8. **Memory-Efficient Streaming** - Handle large files by streaming directly to R2 without buffering
-
-**Edge Constraints**:
-- CPU Time: 30 seconds (hard limit)
-- Memory: 128MB per worker
-- No persistent state between invocations
-- Model availability varies by region
-
-**Priority Edge Features for 3-6 Month Implementation**:
-
-1. **Smart Opportunity Caching** (2-3 weeks) - Edge-side caching with incremental analysis
-2. **Real-Time Quota Dashboard** (3-4 weeks) - Live quota tracking via Durable Objects and WebSockets
-3. **Collaborative Opportunity Review** (4-5 weeks) - Multi-user real-time sessions for reviewing opportunities
-
-**Implementation Roadmap**:
-- Phase 1 (Weeks 1-2): Foundation - Caching and coalescing
-- Phase 2 (Weeks 3-4): Streaming & Composition
-- Phase 3 (Weeks 5-8): Real-Time Features with Durable Objects
-- Phase 4 (Weeks 9-10): Optimization & geographic distribution
-
-**Expected Outcomes**:
-- 40-50% reduction in neuron consumption
-- 50-100ms latency improvement for global users
-- Real-time collaboration capabilities
-- Foundation for advanced edge features
-
-**Key Patterns Identified**:
-1. **Full-Duplex Conversations with Barge-In** - Natural interruptible voice interactions using WebRTC VAD
-2. **Emotionally Responsive Voice AI** - Detect user emotion and adapt TTS/response accordingly
-3. **Ambient Voice Capture** - Privacy-first always-listening with wake word detection (Sherpa-ONNX)
-4. **Multi-Modal Voice Collaboration** - Real-time multi-user voice + code generation
-5. **Voice Persona & Customization** - Custom voice personalities and cloning
-
-**Priority Features for 3-6 Month Implementation**:
-
-1. **Emotionally Responsive Voice** (3-4 weeks)
-   - LLM-based emotion inference from transcripts
-   - TTS parameter adaptation (pitch, rate, volume)
-   - AI response tone adjustment based on detected emotion
-   - Optional Hume AI integration for advanced emotion detection
-
-2. **Full-Duplex Conversations** (4-6 weeks)
-   - WebRTC VAD for continuous voice monitoring
-   - Barge-in detection and handling
-   - Streaming audio pipeline
-   - Interruptible TTS and conversation flow
-
-3. **Voice Persona System** (2-3 weeks)
-   - Multiple voice personalities (Professional, Coach, Concise)
-   - Web Speech API voice parameter controls
-   - Custom persona creation
-   - Optional ElevenLabs integration for premium voices
-
-**Voice Technology Stack**:
-- **VAD**: WebRTC built-in VAD (Cobra/Sherpa-ONNX for advanced)
-- **STT**: Cloudflare Whisper (already integrated)
-- **TTS**: Web Speech API (tier 1), ElevenLabs (tier 2), Hume AI (tier 3)
-- **Emotion**: LLM inference (tier 1), Hume AI/Imentiv AI (tier 2)
-- **RTC**: WebRTC for bidirectional audio, Web Audio API for processing
-
-**Cloudflare Workers AI Integration**:
-```typescript
-// Model usage recommendations for voice features
-const VOICE_MODELS = {
-  transcription: '@cf/openai/whisper-large-v3-turbo',
-  chat: '@cf/meta/llama-3.1-8b-instruct',
-  embedding: '@cf/baai/bge-base-en-v1.5',
-  emotion_inference: '@cf/meta/llama-3.1-8b-instruct', // Until dedicated API
-};
-```
-
-**Implementation Considerations**:
-- Quota management for voice features (10% allocation recommended)
-- Caching strategies for emotion inference and voice responses
-- Privacy controls for emotional data storage
-- Fallback mechanisms when premium voice services unavailable
-
-See `docs/EMERGENT-VOICE-PATTERNS.md` for code examples, implementation checklists, and detailed technology recommendations.
-
-## Gamification & Engagement
-
-### Current Gamification Features
-- **XP & Leveling System**: Users earn XP through tasks and harvests
-- **Streak Tracking**: Daily harvest streaks with visual feedback
-- **Achievements**: Milestone badges (First Harvest, Perfect Day, Week Warrior, etc.)
-- **Progress Dashboard**: Visual display of level, XP, and achievements
-
-### Gamification Philosophy
-
-**Research Document**: See `docs/GAMIFICATION-PATTERNS.md` for comprehensive research on developer-focused gamification, AI-powered personalization, and sustainable engagement strategies.
-
-**Core Principles**:
-
-1. **Developer Motivation**
-   - Developers are motivated by **mastery, autonomy, and efficiency** - not childish rewards
-   - Focus on **quality over quantity** - meaningful contributions, not token activity
-   - Recognize **technical excellence** and **problem-solving skills**
-   - Provide **professional** recognition that aligns with developer identity
-
-2. **AI-Powered Personalization**
-   - **Adaptive difficulty**: Adjust challenge complexity based on user skill level
-   - **Personalized quests**: AI generates contextually relevant challenges
-   - **Smart recommendations**: Suggest achievements aligned with user interests
-   - **Flow state optimization**: Keep users in the challenge-skill balance zone
-
-3. **Sustainable Engagement**
-   - **Burnout prevention**: Implement streak forgiveness and rest days
-   - **Quality metrics**: Reward meaningful work, not just activity
-   - **Anti-gaming measures**: Detect and discourage low-effort participation
-   - **Transparent progress**: Clear expectations, no manipulative FOMO
-
-4. **Ethical Implementation**
-   - **No dark patterns**: Avoid artificial scarcity, predatory monetization, addictive design
-   - **Privacy-first**: Collect minimal data, provide user control
-   - **Inclusivity**: Accessible to all skill levels, neurodiverse-friendly
-   - **Opt-in social features**: Leaderboards and competition are optional
-
-### Gamification Guidelines for Development
-
-**When Adding New Gamification Features**:
-
-1. **Ask These Questions**:
-   - Does this recognize meaningful contributions (not just activity)?
-   - Is this inclusive to developers of all skill levels?
-   - Could this encourage burnout or obsessive behavior?
-   - Is the reward system transparent and fair?
-   - Can users opt-out if they choose?
-
-2. **Anti-Patterns to Avoid**:
-   - ❌ "First to complete" achievements (favors time zones, not skill)
-   - ❌ Leaderboards that can't be opted out of
-   - ❌ Randomized rewards (loot boxes)
-   - ❌ Artificial urgency without genuine time constraints
-   - ❌ Punishing streak breaks (use grace periods instead)
-   - ❌ Requiring real money for gameplay advantages
-
-3. **Recommended Patterns**:
-   - ✅ Quality-based achievements (code quality, success rate)
-   - ✅ Skill trees and learning paths
-   - ✅ Personalized quests based on user's tech stack
-   - ✅ Streak freezes and grace periods
-   - ✅ Seasonal events with alternative paths
-   - ✅ Community collaboration and mentorship
-
-### Current Implementation
-
-**Database Schema**:
-```sql
--- Users track XP, level, and streaks
-CREATE TABLE users (
-  id TEXT PRIMARY KEY,
-  xp INTEGER DEFAULT 0,
-  level INTEGER DEFAULT 1,
-  streak_days INTEGER DEFAULT 0,
-  last_harvest_at INTEGER
-);
-
--- Achievements track milestone unlocks
-CREATE TABLE achievements (
-  id TEXT PRIMARY KEY,
-  user_id TEXT NOT NULL,
-  achievement_type TEXT NOT NULL,
-  xp_awarded INTEGER NOT NULL,
-  unlocked_at INTEGER NOT NULL,
-  FOREIGN KEY (user_id) REFERENCES users(id)
-);
-```
-
-**Current Achievements**:
-- `first_harvest`: Complete your first harvest (100 XP)
-- `perfect_day`: 100% quota usage in one day (500 XP)
-- `time_saver`: Save 10 hours total (1000 XP)
-- `streak_7`: 7-day harvest streak (2000 XP)
-- `hundred_tasks`: Complete 100 tasks (1500 XP)
-
-**XP Formula**:
-```typescript
-// Level calculation: level = floor(sqrt(xp / 100)) + 1
-const newLevel = Math.floor(Math.sqrt(user.xp / 100)) + 1;
-
-// XP rewards:
-// - Task completed: 50 XP
-// - Achievement unlocked: 100-2000 XP (varies by rarity)
-// - Perfect harvest: 500 XP bonus
-```
-
-### Future Gamification Roadmap
-
-**Phase 1: Enhanced Core** (Planned)
-- Adaptive difficulty based on user performance
-- Skill tree system for technical progression
-- Improved streak system with grace periods
-- Quality scoring for generated code/assets
-
-**Phase 2: Social Features** (Planned)
-- Opt-in leaderboards (global, friends, tech stack)
-- Collaborative building sessions
-- Community quest marketplace
-- User profiles with achievement showcases
-
-**Phase 3: Advanced Features** (Planned)
-- AI-powered personalized quest generation
-- Seasonal events and challenges
-- Portfolio generation from achievements
-- Mentorship and community leadership
-
-**See `docs/GAMIFICATION-PATTERNS.md` for**:
-- Detailed case studies (GitHub, Duolingo, StackOverflow)
-- AI-powered gamification patterns
-- Anti-burnout strategies
-- Engagement metrics and analytics
-- Implementation roadmap with phases
-- Ethical guidelines and dark pattern avoidance
+---
 
 ## Repository
 
-- **GitHub**: https://github.com/SuperInstance/makerlog-ai
-- **Production**: https://makerlog.ai
-- **License**: MIT
+- **GitHub:** https://github.com/SuperInstance/makerlog-ai
+- **Production:** https://makerlog.ai
+- **License:** MIT

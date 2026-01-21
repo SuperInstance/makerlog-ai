@@ -1,0 +1,296 @@
+name: Deploy
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Deployment environment'
+        required: true
+        type: choice
+        options:
+          - preview
+          - staging
+          - production
+
+env:
+  NODE_VERSION: '20'
+  CLOUDFLARE_PROJECT_ID: 'makerlog-dashboard'
+  CLOUDFLARE_WORKER_NAME: 'makerlog-api'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Preview deployment (PRs)
+  deploy-preview:
+    name: Deploy Preview
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    environment:
+      name: preview
+      url: ${{ steps.preview-deploy.outputs.url }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build frontend
+        run: npm run build
+        env:
+          VITE_ENVIRONMENT: preview
+
+      - name: Deploy to Cloudflare Pages
+        id: preview-deploy
+        uses: cloudflare/pages-action@v1
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          projectName: ${{ env.CLOUDFLARE_PROJECT_ID }}
+          directory: dist
+          gitHubToken: ${{ secrets.GITHUB_TOKEN }}
+          wranglerVersion: latest
+
+      - name: Deploy worker preview
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: wrangler deploy --env preview
+        working-directory: workers/api
+
+      - name: Comment PR with preview URL
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: '## Preview Deployment Ready\n\n' +
+                    '**Frontend**: ${{ steps.preview-deploy.outputs.url }}\n' +
+                    '**Worker**: https://makerlog-api-preview.workers.dev\n\n' +
+                    'This preview will be updated automatically with new commits.'
+            })
+
+  # Staging deployment
+  deploy-staging:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/develop'
+    environment:
+      name: staging
+      url: https://staging.makerlog.ai
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run database migrations
+        run: npm run db:migrate:staging
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      - name: Build frontend
+        run: npm run build
+        env:
+          VITE_ENVIRONMENT: staging
+
+      - name: Deploy to Cloudflare Pages (staging)
+        uses: cloudflare/pages-action@v1
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          projectName: ${{ env.CLOUDFLARE_PROJECT_ID }}
+          directory: dist
+          branch: develop
+          wranglerVersion: latest
+
+      - name: Deploy worker (staging)
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: wrangler deploy --env staging
+        working-directory: workers/api
+
+      - name: Run smoke tests
+        run: npm run test:smoke:staging
+        env:
+          STAGING_URL: https://staging.makerlog.ai
+
+      - name: Notify Slack
+        uses: slackapi/slack-github-action@v1
+        if: success()
+        with:
+          payload: |
+            {
+              "text": "Staging deployment successful",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*Staging Deployment*\n\nBranch: `${{ github.ref_name }}`\nCommit: `${{ github.sha }}`\nURL: https://staging.makerlog.ai"
+                  }
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+  # Production deployment
+  deploy-production:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    environment:
+      name: production
+      url: https://makerlog.ai
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run pre-deployment checks
+        run: |
+          echo "Checking for unmerged migrations..."
+          npm run db:check-pending
+
+      - name: Create deployment backup
+        run: |
+          BACKUP_NAME="backup-$(date +%Y%m%d-%H%M%S)"
+          echo "BACKUP_NAME=$BACKUP_NAME" >> $GITHUB_ENV
+          npm run db:backup -- $BACKUP_NAME
+
+      - name: Run database migrations
+        id: migrate
+        run: npm run db:migrate:production
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      - name: Store migration info for rollback
+        if: failure()
+        run: |
+          echo "MIGRATION_FAILED=true" >> $GITHUB_ENV
+          echo "BACKUP_NAME=${{ env.BACKUP_NAME }}" >> $GITHUB_ENV
+
+      - name: Build frontend
+        run: npm run build
+        env:
+          VITE_ENVIRONMENT: production
+
+      - name: Deploy to Cloudflare Pages (production)
+        id: pages-deploy
+        uses: cloudflare/pages-action@v1
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          projectName: ${{ env.CLOUDFLARE_PROJECT_ID }}
+          directory: dist
+          production: true
+          wranglerVersion: latest
+
+      - name: Deploy worker (production)
+        id: worker-deploy
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: wrangler deploy --env production
+        working-directory: workers/api
+
+      - name: Run smoke tests
+        id: smoke-test
+        run: npm run test:smoke:production
+        continue-on-error: true
+
+      - name: Automatic rollback on failure
+        if: steps.smoke-test.outcome == 'failure'
+        run: |
+          echo "Smoke tests failed, initiating rollback..."
+          npm run deploy:rollback -- ${{ env.BACKUP_NAME || 'latest' }}
+
+      - name: Health check
+        run: |
+          sleep 30 # Wait for deployment to propagate
+          npm run health:check --production
+
+      - name: Create GitHub release
+        if: success()
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: v${{ github.run_number }}
+          release_name: Release ${{ github.run_number }}
+          body: |
+            ## Production Deployment
+
+            **Commit**: ${{ github.sha }}
+            **Branch**: ${{ github.ref_name }}
+            **Pages Deployment**: ${{ steps.pages-deploy.outputs.url }}
+            **Worker Deployment**: ${{ steps.worker-deploy.outputs.url }}
+
+      - name: Notify Slack
+        uses: slackapi/slack-github-action@v1
+        if: always()
+        with:
+          payload: |
+            {
+              "text": "${{ job.status }} - Production deployment",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*Production Deployment: ${{ job.status }}*\n\nBranch: `${{ github.ref_name }}`\nCommit: `${{ github.sha }}`\nURL: https://makerlog.ai"
+                  }
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+      - name: Notify Discord
+        if: always()
+        uses: sarisia/actions-status-discord@v1
+        with:
+          webhook: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          title: "${{ job.status }} - Production Deployment"
+          description: |
+            Branch: `${{ github.ref_name }}`
+            Commit: `${{ github.sha }}`
+            URL: https://makerlog.ai
+          color: ${{ job.status == 'success' && '0x28a745' || '0xdc3545' }}
+          username: "Makerlog CI/CD"

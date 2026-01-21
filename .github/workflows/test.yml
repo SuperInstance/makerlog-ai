@@ -1,0 +1,212 @@
+name: Test
+
+on:
+  schedule:
+    - cron: '0 6 * * *' # Daily at 6 AM UTC
+  workflow_dispatch:
+    inputs:
+      test_type:
+        description: 'Test type to run'
+        required: true
+        type: choice
+        options:
+          - all
+          - unit
+          - integration
+          - e2e
+          - voice
+          - performance
+
+env:
+  NODE_VERSION: '20'
+
+jobs:
+  # Voice feature testing
+  test-voice:
+    name: Voice Feature Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install FFmpeg (for audio processing tests)
+        run: sudo apt-get install -y ffmpeg
+
+      - name: Run voice transcription tests
+        run: npm run test:voice:transcription
+        env:
+          CI: true
+          MOCK_AUDIO_SAMPLES: './test/fixtures/audio'
+
+      - name: Run TTS tests
+        run: npm run test:voice:tts
+        env:
+          CI: true
+
+      - name: Run audio quality tests
+        run: npm run test:voice:quality
+        env:
+          CI: true
+          AUDIO_QUALITY_THRESHOLD: '0.8'
+
+  # AI model regression testing
+  test-ai-regression:
+    name: AI Model Regression Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run LLM response quality tests
+        run: npm run test:ai:llm-quality
+        env:
+          CI: true
+          EXPECTED_QUALITY_SCORE: '0.75'
+
+      - name: Run embedding consistency tests
+        run: npm run test:ai:embeddings
+        env:
+          CI: true
+
+      - name: Compare against baseline
+        run: npm run test:ai:regression
+        env:
+          CI: true
+          BASELINE_COMMIT: 'main'
+
+  # Performance testing
+  test-performance:
+    name: Performance Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run load tests
+        run: npm run test:performance:load
+        env:
+          CI: true
+          TARGET_URL: https://staging.makerlog.ai
+          CONCURRENT_USERS: '100'
+
+      - name: Run latency tests
+        run: npm run test:performance:latency
+        env:
+          CI: true
+          P50_TARGET: '2000'
+          P95_TARGET: '10000'
+          P99_TARGET: '25000'
+
+      - name: Check bundle size
+        run: npm run test:performance:bundle-size
+        env:
+          CI: true
+          MAX_BUNDLE_SIZE: '1000000' # 1MB for worker
+
+      - name: Upload performance results
+        uses: actions/upload-artifact@v4
+        with:
+          name: performance-results
+          path: test-results/performance/
+
+  # Quota monitoring tests
+  test-quota:
+    name: Quota Monitoring Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Check quota tracking accuracy
+        run: npm run test:quota:tracking
+        env:
+          CI: true
+
+      - name: Test quota alerts
+        run: npm run test:quota:alerts
+        env:
+          CI: true
+          WARNING_THRESHOLD: '80'
+          CRITICAL_THRESHOLD: '95'
+
+      - name: Verify quota optimization
+        run: npm run test:quota:optimization
+        env:
+          CI: true
+          EXPECTED_SAVINGS: '0.3' # 30% reduction expected
+
+  # Security scanning
+  test-security:
+    name: Security Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run dependency audit
+        run: npm audit --audit-level=high
+
+      - name: Run SAST scan
+        uses: github/super-linter@v5
+        env:
+          DEFAULT_BRANCH: main
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VALIDATE_ALL_CODEBASE: false
+          VALIDATE_TYPESCRIPT: true
+          VALIDATE_JAVASCRIPT_ES: true
+
+      - name: Test prompt injection protection
+        run: npm run test:security:prompt-injection
+        env:
+          CI: true
+
+      - name: Test rate limiting
+        run: npm run test:security:rate-limit
+        env:
+          CI: true
+          RATE_LIMIT_THRESHOLD: '100'

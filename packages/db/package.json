@@ -1,0 +1,26 @@
+{
+  "name": "@makerlog-ai/db",
+  "version": "1.0.0",
+  "description": "Database schema and migrations for Makerlog.ai",
+  "main": "schema.sql",
+  "scripts": {
+    "migrate": "wrangler d1 execute makerlog-db --file=./migrations/001_initial_schema.sql",
+    "migrate:dev": "wrangler d1 execute makerlog-db --file=./migrations/001_initial_schema.sql --local",
+    "migrate:test": "wrangler d1 execute makerlog-db-test --file=./migrations/001_initial_schema.sql --local",
+    "seed:test": "wrangler d1 execute makerlog-db-test --file=./seeds/test_data.sql --local",
+    "seed:dev": "wrangler d1 execute makerlog-db --file=./seeds/development_data.sql --local",
+    "query": "wrangler d1 execute makerlog-db --command",
+    "query:local": "wrangler d1 execute makerlog-db --local --command",
+    "backup": "wrangler d1 execute makerlog-db --command=\"SELECT * FROM users\" > backup.json"
+  },
+  "keywords": [
+    "cloudflare",
+    "d1",
+    "sqlite",
+    "database",
+    "schema",
+    "migrations"
+  ],
+  "author": "Makerlog.ai",
+  "license": "MIT"
+}
