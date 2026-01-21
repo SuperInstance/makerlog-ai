@@ -5,34 +5,82 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Table of Contents
 
 - [Project Overview](#project-overview)
+- [Product Philosophy](#product-philosophy)
 - [Quick Start](#quick-start)
 - [Essential Reference Docs](#essential-reference-docs)
 - [Development Commands](#development-commands)
 - [Architecture](#architecture)
+- [Modular Add-On System](#modular-add-on-system)
 - [Key Files](#key-files)
 
 ---
 
 ## Project Overview
 
-**Makerlog.ai** is a hybrid cloud-local voice-first development assistant. Users talk through ideas during the day, and the system automatically detects generative opportunities (code snippets, images, text) that execute:
+**Makerlog.ai** and **Studylog.ai** are two voice-first AI platforms built on shared infrastructure:
 
-- **Light tasks** via Cloudflare free tier AI (10,000 neurons/day)
-- **Heavy tasks** via local Desktop Connector (Ollama, ComfyUI, Automatic1111)
+### Studylog.ai (Under-18)
+Kid-friendly AI learning platform with parent/teacher supervision. Students learn through voice conversations, with daily quota limits and approval workflows for sensitive requests.
 
-The system learns from user feedback to improve generations over time, creating a self-improving loop.
+### Makerlog.ai (Adults, 18+)
+Voice-first development assistant that gamifies Cloudflare free tier quota harvesting. Users talk through ideas during the day, and the system automatically detects generative opportunities that execute overnight.
 
-**Architecture:**
-- **Phone (Daytime)**: Voice capture, quick QC, approve/reject
-- **Desktop (Overnight)**: Heavy generation, local models, iteration loops
-- **Cloud (Always)**: Coordination, vector DB, user prefs, quota tracking
+**Shared Infrastructure:**
+- Voice capture with push-to-talk recording
+- Cloudflare account linking (users bring their own quota)
+- All 9 Cloudflare AI models accessible
+- Quota gamification (XP, leveling, achievements, streaks)
+- Markdown memory with semantic search
+
+**MVP-First Philosophy:**
+Start with core features only. Everything else becomes a modular add-on that users can enable as needed.
 
 **Tech Stack:**
 - Frontend: React 18, TypeScript, Vite, Tailwind CSS
 - Backend: Cloudflare Workers (Hono framework)
-- Desktop Connector: Node.js, WebSocket, local AI models
 - Database: D1 (SQLite), Vectorize (vector search), R2 (storage), KV (cache)
-- AI: Cloudflare Workers AI (Whisper, Llama, BGE) + Local (Ollama, ComfyUI, A1111)
+- AI: Cloudflare Workers AI (all 9 models)
+
+**Monetization:**
+- Studylog.ai: Tutorial videos (non-intrusive)
+- Makerlog.ai: Banner ads (unobtrusive)
+
+---
+
+## Product Philosophy
+
+### "The Microsoft Problem"
+
+**Principle:** Don't design for imaginary "middle users" who don't exist.
+
+Apple creates specific products for specific users (iPhone, iPad, Mac). Microsoft creates bloated products for imaginary "average" users.
+
+**Our Approach:**
+- **Studylog.ai**: Designed specifically for kids (8-17), with COPPA compliance, parental oversight, and age-appropriate UI
+- **Makerlog.ai**: Designed specifically for adults (18+), with voice-first workflow and developer-focused gamification
+- **No "middle user"**: Each product serves its specific audience perfectly
+
+### MVP + Add-Ons
+
+**Core MVP Features** (both platforms):
+1. Cloudflare account access (users' own storage/quota)
+2. Long-running voice recorder with intelligent segmentation
+3. STT/TTS system for hands-free dialogue
+4. Quota gamification system
+5. All 9 Cloudflare AI models accessible
+
+**Modular Add-Ons** (enabled as needed):
+- Threaded conversations
+- AI-powered summaries
+- Desktop connector (local AI acceleration)
+- Advanced memory (Engram O(1) lookup, HNSW indexing)
+- Recursive Language Models (RLM)
+- Agent swarms and hierarchical planning
+
+**Progressive Enhancement:**
+- Basic users get simple, fast experience
+- Power users can add complexity as needed
+- No performance penalty for unused features
 
 ---
 
@@ -64,22 +112,47 @@ npm run deploy:all
 
 ## Essential Reference Docs
 
-For detailed implementation guidance, patterns, and research, see:
-
+### MVP Platform Definition
 | Topic | Document |
 |-------|----------|
-| **Getting Started** | `docs/ONBOARDING.md` |
-| **Desktop Connector** | `docs/DESKTOP-CONNECTOR.md` |
-| **Self-Improvement System** | `docs/SELF-IMPROVEMENT.md` |
+| **Studylog.ai Platform** | `docs/research/STUDYLOG-KIDS-PLATFORM.md` |
+| **Makerlog.ai MVP** | `docs/research/MAKERLOG-MVP-VOICE-FIRST.md` |
+| **Implementation Roadmap** | `docs/plans/IMPLEMENTATION-ROADMAP.md` |
+
+### Modular Architecture
+| Topic | Document |
+|-------|----------|
+| **Add-On Architecture** | `docs/research/MODULAR-ADDON-ARCHITECTURE.md` |
+| **Feature Flags** | `docs/research/FEATURE-FLAG-SYSTEM.md` |
+| **Module Development** | `docs/research/MODULE-DEVELOPMENT-GUIDE.md` |
+
+### Integration & Patterns
+| Topic | Document |
+|-------|----------|
+| **Cloudflare Integration** | `docs/research/CLOUDFLARE-INTEGRATION-PATTERNS.md` |
+| **Voice Recorder** | `docs/research/VOICE-RECORDER-SEGMENTATION.md` |
 | **AI Agent Architecture** | `docs/EMERGENT-AGENT-ARCHITECTURES.md` |
 | **Voice Features** | `docs/EMERGENT-VOICE-PATTERNS.md` |
-| **Mobile Development** | `docs/MOBILE-DEVELOPMENT-PATTERNS.md` |
-| **Edge Computing** | `docs/EDGE-COMPUTING-PATTERNS.md` |
+
+### Optimization & Operations
+| Topic | Document |
+|-------|----------|
 | **Performance Optimization** | `docs/PERFORMANCE-OPTIMIZATION.md` |
+| **Edge Computing** | `docs/EDGE-COMPUTING-PATTERNS.md` |
+| **Mobile Development** | `docs/MOBILE-DEVELOPMENT-PATTERNS.md` |
 | **Analytics & Monitoring** | `docs/ANALYTICS-OBSERVABILITY.md` |
-| **CI/CD Pipeline** | `docs/CICD-AUTOMATION-PATTERNS.md`, `docs/CICD-SETUP-GUIDE.md` |
+| **CI/CD Pipeline** | `docs/CICD-AUTOMATION-PATTERNS.md` |
+
+### Advanced Features (Add-Ons)
+| Topic | Document |
+|-------|----------|
+| **Desktop Connector** | `docs/DESKTOP-CONNECTOR.md` |
+| **Self-Improvement** | `docs/SELF-IMPROVEMENT.md` |
+| **Recursive Language Models** | `docs/research/RECURSIVE-LANGUAGE-MODELS.md` |
+| **Engram Memory** | `docs/research/ENGRAM-CONDITIONAL-MEMORY.md` |
+| **Tiered Memory** | `docs/research/TIERED-MEMORY-ARCHITECTURES.md` |
+| **Vector Indexing** | `docs/research/VECTOR-DATABASE-INDEXING.md` |
 | **Gamification** | `docs/GAMIFICATION-PATTERNS.md` |
-| **Roadmap** | `docs/ROADMAP.md` |
 
 ---
 
@@ -123,50 +196,70 @@ makerlog-ai/
 ├── src/                          # React frontend
 │   ├── VoiceChat.tsx             # Main voice interface
 │   ├── Dashboard.tsx             # Quota tracking & tasks
+│   ├── StudylogChat.tsx          # Kid-friendly chat UI
 │   └── main.tsx                  # App entry point
 ├── workers/api/                  # Cloudflare Worker (Hono)
 │   └── src/
 │       ├── routes/               # API endpoints
-│       ├── agents/               # AI agent system
-│       ├── websocket/            # WebSocket for desktop connector
-│       └── middleware/           # Request processing
+│       ├── middleware/           # Auth, safety, rate limiting
+│       ├── modules/              # Add-on system
+│       └── services/             # Business logic
 ├── packages/
-│   ├── desktop-connector/        # Node.js desktop daemon
-│   │   ├── src/
-│   │   │   ├── index.ts          # Main connector
-│   │   │   ├── generators/       # Local AI integrations
-│   │   │   ├── learning/         # Self-improvement system
-│   │   │   └── storage/          # Asset management
-│   │   ├── package.json
-│   │   └── README.md
-│   └── db/                       # Database package
-│       ├── migrations/
-│       ├── seeds/
-│       └── schema.sql
+│   ├── db/                       # Database package
+│   │   ├── migrations/
+│   │   ├── seeds/
+│   │   └── schema.sql
+│   └── desktop-connector/        # OPTIONAL ADD-ON
+│       └── src/                  # Local AI acceleration
 ├── schema/                       # D1 database migrations
 ├── docs/                         # Detailed documentation
 └── .github/workflows/            # CI/CD pipelines
 ```
 
-### Hybrid Architecture
+### Platform Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                           USER'S WORKFLOW                                    │
+│                        SHARED CLOUDFLARE INFRASTRUCTURE                      │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                              │
-│  PHONE (Daytime)              DESKTOP (Overnight)         CLOUD (Always)    │
-│  ─────────────────           ──────────────────          ───────────────    │
-│  • Voice capture             • Heavy generation           • Coordination    │
-│  • Quick QC                  • Iteration loops            • Vector DB       │
-│  • Approve/reject            • Local models               • User prefs      │
-│  • Fine-tune prompts         • File organization          • Quota tracking  │
-│                              • Watch for changes          • Sync state      │
+│  ┌─────────────────┐         ┌─────────────────┐                            │
+│  │   Studylog.ai   │         │  Makerlog.ai    │                            │
+│  │    (Under-18)   │         │    (Adults 18+) │                            │
+│  ├─────────────────┤         ├─────────────────┤                            │
+│  │ Voice Chat UI   │         │ Voice Chat UI   │                            │
+│  │ Daily Quota     │         │ Harvest Tasks   │                            │
+│  │ Parent Dashboard│         │ Achievement Sys │                            │
+│  │ Approval Queue  │         │ Opportunity Det │                            │
+│  └────────┬────────┘         └────────┬────────┘                            │
+│           │                           │                                     │
+│           └───────────┬───────────────┘                                     │
+│                       ▼                                                     │
+│           ┌───────────────────────┐                                        │
+│           │  SHARED SERVICES      │                                        │
+│           ├───────────────────────┤                                        │
+│           │ Voice Recorder (VAD)  │                                        │
+│           │ STT/TTS Pipeline      │                                        │
+│           │ All 9 AI Models       │                                        │
+│           │ Quota Gamification    │                                        │
+│           │ Markdown Memory       │                                        │
+│           └───────────┬───────────┘                                        │
+│                       ▼                                                     │
+│           ┌───────────────────────┐                                        │
+│           │  CLOUDFLARE WORKERS   │                                        │
+│           ├───────────────────────┤                                        │
+│           │ D1 Database           │                                        │
+│           │ Vectorize Search      │                                        │
+│           │ R2 Storage            │                                        │
+│           │ KV Cache              │                                        │
+│           │ AI Gateway            │                                        │
+│           └───────────────────────┘                                        │
 │                                                                              │
-│  ───────────────────────────────────────────────────────────────────────    │
-│                           FEEDBACK LOOP                                      │
-│                                                                              │
-│   Generate → Review → [Keep/Project/Future/Prune] → Learn → Better Prompts  │
+│                         MODULAR ADD-ONS (Optional)                          │
+│  ┌────────────┐  ┌────────────┐  ┌────────────┐  ┌────────────┐           │
+│  │ Desktop    │  │ Threaded   │  │ AI         │  │ Advanced   │           │
+│  │ Connector  │  │ Convers    │  │ Summaries  │  │ Memory     │           │
+│  └────────────┘  └────────────┘  └────────────┘  └────────────┘           │
 │                                                                              │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -179,29 +272,81 @@ makerlog-ai/
 | `GET/POST /api/conversations` | Conversation management |
 | `POST /api/search` | Semantic vector search |
 | `GET /api/opportunities` | List detected generative tasks |
-| `POST /api/harvest` | Execute all queued tasks (cloud) |
+| `POST /api/opportunities/:id/queue` | Queue opportunity for generation |
+| `POST /api/harvest` | Execute all queued tasks |
 | `GET /api/quota` | Real-time quota tracking |
-| `WebSocket /api/ws` | Desktop connector real-time sync |
+| `POST /api/studylog/approvals/:id` | Parent approval (Studylog) |
+| `POST /api/studylog/allowance` | Daily quota request (Studylog) |
 
-### Desktop Connector
+---
 
-**Installation:** `npm install -g makerlog-connector`
+## Modular Add-On System
 
-**Features:**
-- Connects to cloud via WebSocket for task distribution
-- Runs local AI models (Ollama, ComfyUI, Automatic1111)
-- Self-improving style profiles from user feedback
-- Overnight batch execution with idle detection
-- Automatic storage management and pruning
+### Three-Layer Feature Flags
 
-**CLI Commands:**
-```bash
-makerlog-connector start     # Start the daemon
-makerlog-connector config    # Configure connection
-makerlog-connector status    # Show status
+**Layer 1: Static (Build-time)**
+- Vite code splitting
+- `import()` for lazy loading
+- No runtime overhead
+
+**Layer 2: Dynamic (KV)**
+- Feature flags in Cloudflare KV
+- <5ms evaluation
+- User-level or global toggles
+
+**Layer 3: Permission (D1)**
+- User entitlements in database
+- Subscription tracking
+- Add-on enable/disable
+
+### Module Interface
+
+```typescript
+export interface MakerlogModule {
+  id: string;
+  name: string;
+  version: string;
+  dependencies?: string[];
+
+  initialize(context: ModuleContext): Promise<void>;
+  destroy?(): Promise<void>;
+
+  routes?: RouteDefinition[];
+  components?: ComponentDefinition[];
+  apiEndpoints?: ApiEndpointDefinition[];
+  databaseMigrations?: MigrationDefinition[];
+
+  capabilities: ModuleCapability[];
+  pricing: ModulePricing;
+}
 ```
 
-See `docs/DESKTOP-CONNECTOR.md` for complete documentation.
+### Add-On Catalog
+
+**Tier 1 Add-Ons** ($5/month or usage-based):
+- Threaded Conversations - Multi-thread chat UI
+- AI Summaries - Automatic conversation summaries
+- Advanced Memory - HNSW vector indexing + Engram O(1) lookup
+
+**Tier 2 Add-Ons** ($10/month):
+- Desktop Connector - Local AI acceleration (8-16GB VRAM required)
+- Agent Swarms - Parallel specialist agents
+- Hierarchical Planning - BabyAGI task decomposition
+
+**Tier 3 Add-Ons** ($15/month):
+- Recursive Language Models - Unlimited context reasoning
+- Real-Time Collaboration - Multi-user sessions
+- Custom Voice Personas - ElevenLabs integration
+
+### Developing Add-Ons
+
+1. Create module in `workers/api/src/modules/{module-name}/`
+2. Implement `MakerlogModule` interface
+3. Add routes, components, migrations as needed
+4. Register in module registry
+5. Add feature flag to KV
+
+See `docs/research/MODULE-DEVELOPMENT-GUIDE.md` for complete guide.
 
 ---
 
@@ -216,11 +361,15 @@ See `docs/DESKTOP-CONNECTOR.md` for complete documentation.
 - `AI` - Cloudflare AI services
 - `DB` - D1 database (makerlog-db)
 - `ASSETS` - R2 bucket for files
-- `KV` - Cache namespace
+- `KV` - Cache namespace + feature flags
 - `VECTORIZE` - Semantic search index
 
 ### Database Schema
-Key tables: `users`, `conversations`, `messages`, `tasks`, `opportunities`, `achievements`, `style_profiles`, `generated_assets`, `user_feedback`
+**Core Tables:** `users`, `conversations`, `messages`, `tasks`, `opportunities`, `achievements`
+
+**Studylog Tables:** `students`, `parent_child_relationships`, `approval_requests`, `daily_allowances`, `teacher_classes`
+
+**Add-On Tables:** `style_profiles`, `generated_assets`, `user_feedback`, `voice_personas`, `user_settings`
 
 ---
 
@@ -236,6 +385,7 @@ Key tables: `users`, `conversations`, `messages`, `tasks`, `opportunities`, `ach
 - Functional components with TypeScript
 - Tailwind CSS for styling
 - Push-to-talk recording via MediaRecorder API
+- Progressive Web App (PWA) capabilities
 
 ### Audio Processing Flow
 1. Record audio → WebM blob
@@ -267,30 +417,59 @@ Key tables: `users`, `conversations`, `messages`, `tasks`, `opportunities`, `ach
 
 ---
 
-## Agent System
+## Platform-Specific Features
 
-Makerlog.ai uses a multi-agent architecture for Cloudflare Workers edge environment:
+### Studylog.ai (Under-18)
 
-**Agent Types:**
-- **Opportunity Detection Swarm** - Parallel specialist agents (code, image, text, research)
-- **ReAct Reasoning** - Thought → Action → Observation loops
-- **Hierarchical Task Planner** - BabyAGI-inspired decomposition
-- **Reflective Learning** - Experience storage + few-shot learning
-- **Event-Driven Pipeline** - Async D1 queue communication
+**COPPA Compliance:**
+- Age verification (birth date + parent consent)
+- Parental supervision dashboard
+- Approval workflows for sensitive requests
+- Content filtering with Llama Guard 3
+- Data minimization (right to be forgotten)
 
-**Constraints:** Stateless, <25s per task, 128MB memory, aggressive KV caching (24h TTL)
+**User Personas:**
+- **Students (8-17)**: Voice chat, project save, share with teacher
+- **Parents**: Real-time activity, approval queue, daily allowance settings
+- **Teachers**: Class overview (25 students), lesson planning, analytics
 
-See `docs/EMERGENT-AGENT-ARCHITECTURES.md` for complete details.
+**Safety Features:**
+- Multi-layer content filtering (input, output, context)
+- Daily quota limits (set by parents)
+- Time-of-day restrictions
+- Push notifications for approvals
 
----
+**Gamification:**
+- XP for learning activities
+- Level progression (Explorer → Builder → Architect)
+- Educational achievements (First Code, Story Master, Quiz Whiz)
+- Streaks with grace days
 
-## Gamification
+**Monetization:** Tutorial videos (non-intrusive, educational value)
 
-**Current Features:** XP/leveling, streak tracking, achievements (First Harvest, Perfect Day, Week Warrior, etc.)
+### Makerlog.ai (Adults 18+)
 
-**Philosophy:** Developer-focused (mastery, autonomy, efficiency) not childish rewards. Quality over quantity. Anti-burnout with streak forgiveness.
+**Voice-First Workflow:**
+- Push-to-talk recording (96×96px button)
+- Progressive upload to R2 (prevents data loss)
+- VAD-based segmentation (intelligent breaks)
+- Screenshot integration with timeline sync
 
-See `docs/GAMIFICATION-PATTERNS.md` for design principles and roadmap.
+**All 9 AI Models:**
+- Whisper (STT), Web Speech API (TTS)
+- Llama 3.1 8B (text, code, translation, summarization)
+- SDXL (image generation)
+- Florence-2 (image analysis)
+- Resnet-50 (classification)
+- BGE (embeddings)
+
+**Gamification:**
+- XP formula: `level = floor(sqrt(xp / 100)) + 1`
+- Achievements: First Harvest (100 XP), Perfect Day (500 XP), Week Warrior (2000 XP)
+- Streaks: Daily harvest tracking
+- Quota dashboard: Real-time neuron usage
+
+**Monetization:** Banner ads (unobtrusive footer/sidebar)
 
 ---
 
@@ -298,9 +477,16 @@ See `docs/GAMIFICATION-PATTERNS.md` for design principles and roadmap.
 
 **Error Handling:** Exponential backoff, circuit breakers, graceful degradation
 
-**Security:** Input validation, Llama Guard 3 content moderation, rate limiting, prompt injection protection
+**Security:**
+- Input validation for all user inputs
+- Llama Guard 3 content moderation (Studylog)
+- Rate limiting via Cloudflare Rate Limiter
+- Prompt injection protection
 
-**Monitoring:** Workers Analytics (built-in), Sentry (recommended), custom metrics
+**Monitoring:**
+- Cloudflare Workers Analytics (built-in, free)
+- Sentry (optional, for error tracking)
+- Custom metrics for quota tracking
 
 **Privacy-First Analytics:** See `docs/ANALYTICS-OBSERVABILITY.md` for GDPR/EU AI Act compliant strategy
 
@@ -319,34 +505,64 @@ See `docs/PERFORMANCE-OPTIMIZATION.md` for comprehensive strategies, code exampl
 
 ---
 
-## Self-Improvement System
+## Gamification
 
-**Core Concept:** The system learns from user feedback to improve future generations.
+**Philosophy:** Quality over quantity. Meaningful contributions, not token activity.
 
-**Feedback Loop:**
-1. Generate asset (image/text/code)
-2. User reviews: 1-5 stars + disposition (project/library/prune)
-3. System learns: Style vectors, prompt modifiers, preferences
-4. Next generation: Enhanced prompts based on learned profile
+**Studylog.ai:** Educational progression (Explorer → Builder → Architect)
 
-**Style Profile:**
-- **Positive examples**: Assets rated 4-5 stars
-- **Negative examples**: Assets rated 1-2 stars
-- **Preference vector**: Learned direction in embedding space
-- **Prompt modifiers**: Tags and phrases added to prompts automatically
+**Makerlog.ai:** Developer-focused (mastery, autonomy, efficiency)
 
-**Asset Lifecycle:**
-- **Cache**: Temporary generation results (auto-pruned)
-- **Project**: Assets for current project
-- **Library**: Assets saved for future projects
-- **Prune**: Marked for deletion when storage is full
+**Anti-Burnout:** Streak forgiveness, grace days, quality metrics
 
-See `docs/SELF-IMPROVEMENT.md` for complete documentation.
+See `docs/GAMIFICATION-PATTERNS.md` for design principles and roadmap.
+
+---
+
+## 12-Week Implementation Roadmap
+
+**Phase 1: Foundation (Weeks 1-2)**
+- Database schema extensions
+- Safety infrastructure (Llama Guard 3)
+- Feature flag system (KV + Vite)
+- Module registry
+
+**Phase 2-4: Studylog.ai (Weeks 3-8)**
+- Student chat interface
+- Parent dashboard + push notifications
+- Teacher classroom management
+
+**Phase 5-6: Makerlog.ai Core (Weeks 3-6)**
+- Voice recorder with VAD
+- STT/TTS integration
+- All 9 AI models
+- Markdown memory
+
+**Phase 7: Gamification (Weeks 7-8)**
+- XP/leveling system
+- Achievements
+- Streaks
+- Quota dashboards
+
+**Phase 8: Modular Add-Ons (Weeks 9-10)**
+- Threaded conversations
+- AI summaries
+- Desktop connector
+- Advanced memory
+
+**Phase 9: Polish & Launch (Weeks 11-12)**
+- COPPA compliance testing
+- Safety testing
+- User testing
+- Documentation
+
+See `docs/plans/IMPLEMENTATION-ROADMAP.md` for complete details.
 
 ---
 
 ## Repository
 
 - **GitHub:** https://github.com/SuperInstance/makerlog-ai
-- **Production:** https://makerlog.ai
+- **Makerlog.ai:** https://makerlog.ai (adults 18+)
+- **Studylog.ai:** https://studylog.ai (under-18, coming soon)
 - **License:** MIT
