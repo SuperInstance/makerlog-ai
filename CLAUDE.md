@@ -183,6 +183,144 @@ npm run db:migrate:test   # Set up test D1 database
 - Database migrations require manual execution
 - Vectorize index must be created before deployment
 
+## CI/CD Pipeline
+
+### GitHub Actions Workflows
+
+Makerlog.ai uses GitHub Actions for automated CI/CD:
+
+**Main Workflows**:
+- `.github/workflows/ci.yml` - Continuous integration (lint, test, build)
+- `.github/workflows/deploy.yml` - Automated deployments
+- `.github/workflows/test.yml` - Scheduled and manual test runs
+
+**CI Pipeline Stages**:
+1. **Validation**: Linting (ESLint), type checking (TypeScript), formatting (Prettier)
+2. **Testing**: Unit tests (Vitest), integration tests, E2E tests (Playwright)
+3. **Security**: Dependency audit, vulnerability scanning
+4. **Build**: Frontend build, worker bundle verification
+
+**Deployment Pipeline**:
+- **Preview**: Automatic for every PR
+- **Staging**: On push to `develop` branch
+- **Production**: On push to `main` branch (with smoke tests)
+
+**Quality Gates**:
+- All tests must pass before merge
+- Code coverage thresholds: 80% lines, 80% functions, 75% branches
+- TypeScript strict mode enforced
+- ESLint and Prettier checks required
+- Worker bundle size < 1MB
+
+### Cloudflare Deployment Commands
+
+```bash
+# Frontend deployment
+npm run build
+wrangler pages deploy dist --project-name makerlog-dashboard
+
+# Worker deployment
+cd workers/api
+wrangler deploy                    # Development
+wrangler deploy --env staging      # Staging
+wrangler deploy --env production   # Production
+
+# Database migrations
+wrangler d1 execute makerlog-db --file=./schema/migrations/001_initial.sql
+
+# Environment-specific operations
+wrangler d1 execute makerlog-db --command="SELECT * FROM users" --env production
+```
+
+### Environment Variables
+
+**Required GitHub Secrets**:
+- `CLOUDFLARE_API_TOKEN` - Cloudflare API token for deployments
+- `CLOUDFLARE_ACCOUNT_ID` - Your Cloudflare account ID
+
+**Optional**:
+- `SLACK_WEBHOOK_URL` - For deployment notifications
+- `DISCORD_WEBHOOK_URL` - For deployment notifications
+
+**Environment Configuration**:
+- **Development**: Local (wrangler dev), mock AI services
+- **Preview**: PR deployments, isolated database, real AI with quotas
+- **Staging**: develop branch, staging database, full AI quota
+- **Production**: main branch, production database, full AI quota
+
+### Deployment Safety
+
+**Pre-deployment Checks**:
+- All tests passing (unit, integration, E2E)
+- Code coverage thresholds met
+- Security scan clean
+- No pending database migrations (or manual approval required)
+
+**Post-deployment Verification**:
+- Automated smoke tests
+- Health check endpoint verification
+- Error rate monitoring (alert if >5%)
+- Automatic rollback on critical failures
+
+**Rollback Procedures**:
+```bash
+# Worker rollback
+wrangler rollback <deployment-id> --env production
+
+# Pages rollback
+wrangler pages deployment rollback <deployment-id> --project-name makerlog-dashboard
+
+# Database rollback
+wrangler d1 backups restore makerlog-db <backup-id> --env production
+```
+
+### Testing in CI/CD
+
+**AI Service Mocking**:
+- Use MSW (Mock Service Worker) to mock AI responses in tests
+- Test AI-dependent code without consuming quota
+- Validate request/response schemas
+
+**Voice Feature Testing**:
+- Mock MediaRecorder API for audio recording tests
+- Test audio processing with sample files
+- Verify transcription and TTS functionality
+
+**Performance Testing**:
+- Bundle size checks on every build
+- Load tests for API endpoints
+- Latency thresholds (P50 < 2s, P95 < 10s, P99 < 25s)
+
+### Monitoring & Alerting
+
+**Key Metrics**:
+- Error rate (alert if >5% warning, >10% critical)
+- Response latency (P95 > 10s warning, >15s critical)
+- Neuron quota usage (alert at 80%, critical at 95%)
+- Worker CPU time usage
+
+**Health Checks**:
+- `/health` - Basic health status
+- `/health/ready` - Readiness probe (checks all dependencies)
+- `/health/live` - Liveness probe
+
+**Dashboard Requirements**:
+- Real-time request volume and error rate
+- Neuron usage per model
+- P50/P95/P99 latency by endpoint
+- Cache hit rates
+- Active users and conversations
+
+### CI/CD Best Practices
+
+1. **Always test before deploying**: Run full test suite before production deployment
+2. **Use preview deployments**: Test critical flows in preview before merging
+3. **Monitor everything**: Track deployment success rate, error rates, latency
+4. **Automate rollbacks**: Auto-rollback on health check failure
+5. **Secure credentials**: Use GitHub Actions secrets, never commit keys
+
+For comprehensive CI/CD patterns and configurations, see `docs/CICD-AUTOMATION-PATTERNS.md`.
+
 ## Production Readiness
 
 ### Error Handling
@@ -197,11 +335,72 @@ npm run db:migrate:test   # Set up test D1 database
 - **Rate Limiting**: Per-user and per-IP limits via Cloudflare Rate Limiter
 - **Prompt Injection Protection**: Firewall for AI rules
 
-### Monitoring
+### Monitoring & Analytics
 - **Workers Observability**: OpenTelemetry integration for traces and metrics
 - **Custom Metrics**: Track AI requests, errors, latency, neuron usage
 - **Alerting**: Critical alerts for quota thresholds, error rates, latency
 - **Logging**: Structured JSON logs for all AI operations
+
+**Privacy-First Analytics Philosophy**:
+- See `docs/ANALYTICS-OBSERVABILITY.md` for comprehensive analytics strategy
+- **Core Principle**: Measure success without storing user voice data
+- **Essential Metrics**: System health, AI performance, feature usage (aggregate only)
+- **Valuable Metrics**: Voice adoption rate, opportunity accuracy, task completion (anonymized)
+- **Prohibited**: Voice recordings for analytics, user identity without consent, cross-site tracking
+- **Compliance**: GDPR and EU AI Act compliant (August 2026 deadline)
+
+**Key Analytics Guidelines**:
+1. **Data Minimization**: Collect minimum data necessary for analytics goals
+2. **Aggregate Metrics**: Report averages, distributions, not individual data
+3. **Differential Privacy**: Add mathematical noise to prevent reverse-engineering
+4. **Consent Management**: Granular opt-in for non-essential analytics
+5. **User Control**: Users can view/export/delete their own data
+
+**15 Essential Metrics** (from Analytics Strategy):
+1. Request Latency (P50, P95, P99) - Target: P95 < 2s
+2. Error Rate by Endpoint - Target: < 0.1%
+3. AI Model Success Rate - Target: > 98%
+4. Quota Utilization Rate - Target: > 70%
+5. Cache Hit Rate - Target: > 30%
+6. Voice Adoption Rate - Target: > 80%
+7. Opportunity Acceptance Rate - Target: > 60%
+8. Task Completion Rate - Target: > 90%
+9. Streak Engagement - Target: > 30% with 7+ day streaks
+10. DAU/MAU Stickiness - Target: > 20%
+11. Transcription Accuracy (user-reported) - Target: > 95%
+12. Opportunity Detection Precision - Target: > 70%
+13. Response Time by AI Model - Target: P95 < 5s
+14. Quota Cost per Task Type - Understand cost structure
+15. Agent Performance (when implemented) - Target: > 90% success
+
+**Tool Recommendations**:
+- **System Health**: Cloudflare Workers Analytics (built-in, free)
+- **Web Traffic**: Cloudflare Web Analytics (privacy-first, no cookies)
+- **Error Tracking**: Sentry (configurable data scrubbing)
+- **Custom Analytics**: D1-based user metrics (user-controlled)
+- **Avoid**: Google Analytics, Mixpanel (default), FullStory, LogRocket
+
+**Implementation Resources**:
+```typescript
+// Enable Workers Analytics in wrangler.toml
+[observability]
+enabled = true
+head_sampling_rate = 1
+
+// Enable AI Gateway metrics
+[ai]
+gateway = {
+  id = "makerlog-gateway",
+  metrics = ["latency", "neurons", "errors"]
+}
+
+// Custom metrics in Workers
+await env.CF_ANALYTICS?.writeDataPoint({
+  blobs: ['voice_transcribe', 'success'],
+  doubles: [duration_ms],
+  indexes: ['api_endpoint_latency']
+});
+```
 
 ### Cost Management
 - **Daily Quota Tracking**: Monitor neuron usage with alerts at 80%/95%

@@ -89,6 +89,9 @@ class WorkersAIWrapper {
 - [ ] Daily quota tracking with alerts (80%, 95%)
 - [ ] Error rate alerting (>5% warning, >10% critical)
 - [ ] Latency alerting (P95 > 5s warning, >15s critical)
+- [ ] CI/CD pipeline monitoring and dashboards
+- [ ] Deployment health checks and smoke tests
+- [ ] Automated rollback triggers
 
 **Dashboard Requirements**:
 - Real-time request volume and error rate
@@ -96,6 +99,16 @@ class WorkersAIWrapper {
 - P50/P95/P99 latency by endpoint
 - Cache hit rates
 - Active users and conversations
+- CI/CD pipeline success rate and duration
+- Deployment frequency and lead time
+- Change failure rate
+
+**CI/CD Monitoring**:
+- Track deployment success rate (target: >95%)
+- Monitor pipeline duration (target: <10 minutes)
+- Alert on repeated deployment failures
+- Track rollback frequency
+- Monitor test flakiness
 
 ### 1.5 Accessibility Foundation (Week 4)
 **Owner**: Frontend Team
@@ -108,6 +121,40 @@ class WorkersAIWrapper {
 - [ ] Text alternatives for all audio content
 
 **WCAG 2.2 Level A Compliance**: ✅ Target
+
+### 1.6 CI/CD Foundation (Week 4)
+**Owner**: DevOps Team
+**Deliverables**:
+- [ ] GitHub Actions workflows (ci.yml, deploy.yml, test.yml)
+- [ ] Automated linting (ESLint) and formatting (Prettier) checks
+- [ ] TypeScript strict mode enforcement in CI
+- [ ] Code coverage reporting with thresholds
+- [ ] Cloudflare Pages preview deployments for PRs
+- [ ] Cloudflare Workers deployment automation
+- [ ] Environment variable management (dev, staging, prod)
+
+**CI/CD Pipeline Stages**:
+1. **Validation**: Lint, type check, format check
+2. **Testing**: Unit tests, integration tests, E2E tests
+3. **Security**: Dependency audit, vulnerability scanning
+4. **Build**: Frontend build, worker bundle verification
+5. **Deploy**: Preview (PR), staging (develop), production (main)
+
+**Acceptance Criteria**:
+- All PRs must pass CI checks before merge
+- Automatic preview deployments for every PR
+- Staging deployments on push to develop
+- Production deployments on push to main (with manual approval)
+- Worker bundle size < 1MB enforced in CI
+- Code coverage thresholds: 80% lines, 80% functions, 75% branches
+- Automatic rollback on deployment failure
+
+**Quality Gates**:
+- ESLint and Prettier must pass
+- TypeScript strict mode compilation
+- All tests (unit, integration, E2E) must pass
+- Security scan clean (no high/critical vulnerabilities)
+- Performance budgets met (bundle size, load time)
 
 ---
 
@@ -421,12 +468,20 @@ CREATE INDEX idx_vector_search ON embeddings USING vector(embedding);
 - [ ] Failure scenario testing (model outages, etc.)
 - [ ] Capacity planning document
 - [ ] Auto-scaling configuration (if using paid tier)
+- [ ] CI/CD pipeline performance optimization
+- [ ] Automated performance regression tests
 
 **Load Test Scenarios**:
 - 100 concurrent users
 - 1,000 concurrent users
 - Spike test (10x normal traffic)
 - Failure injection (model timeout, rate limit)
+
+**CI/CD Enhancements**:
+- Parallel test execution for faster feedback
+- Caching strategies for dependencies
+- Incremental deployment testing
+- Performance budget enforcement in CI
 
 ### 4.4 Documentation & Runbooks (Weeks 32-33)
 **Owner**: DevOps Team
@@ -597,6 +652,7 @@ Phase 1: Foundation
 ├── Error Handling (Required for Phase 2)
 ├── Security Baseline (Required for Phase 3)
 ├── Monitoring (Required for all phases)
+├── CI/CD Foundation (Required for all phases)
 └── Accessibility Foundation (Required for Phase 3)
 
 Phase 2: Core Features
@@ -615,6 +671,7 @@ Phase 4: Scale & Optimize
 ├── Database Optimization (Requires Phase 2 Features)
 ├── Geographic Distribution (Requires Phase 3 Performance)
 ├── Load Testing (Requires all previous phases)
+├── CI/CD Performance Optimization (Requires Phase 1 CI/CD)
 └── Documentation (Requires all previous phases)
 
 Phase 5: Launch
@@ -622,3 +679,7 @@ Phase 5: Launch
 ├── Staged Rollout (Requires Phase 4 Load Testing)
 └── Public Launch (Requires Phase 5 Pre-Launch)
 ```
+
+## Additional Documentation
+
+**CI/CD Automation**: See `docs/CICD-AUTOMATION-PATTERNS.md` for comprehensive CI/CD pipeline configurations, GitHub Actions workflow examples, automated deployment strategies, quality gate configurations, and monitoring setup for Cloudflare Workers/Pages deployment.
