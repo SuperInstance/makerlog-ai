@@ -15,13 +15,24 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**Makerlog.ai** is a voice-first development assistant that gamifies Cloudflare free tier quota harvesting. Users talk through ideas during the day, and the system automatically detects generative opportunities (code snippets, images, text) that execute overnight using unused free tier credits.
+**Makerlog.ai** is a hybrid cloud-local voice-first development assistant. Users talk through ideas during the day, and the system automatically detects generative opportunities (code snippets, images, text) that execute:
+
+- **Light tasks** via Cloudflare free tier AI (10,000 neurons/day)
+- **Heavy tasks** via local Desktop Connector (Ollama, ComfyUI, Automatic1111)
+
+The system learns from user feedback to improve generations over time, creating a self-improving loop.
+
+**Architecture:**
+- **Phone (Daytime)**: Voice capture, quick QC, approve/reject
+- **Desktop (Overnight)**: Heavy generation, local models, iteration loops
+- **Cloud (Always)**: Coordination, vector DB, user prefs, quota tracking
 
 **Tech Stack:**
 - Frontend: React 18, TypeScript, Vite, Tailwind CSS
 - Backend: Cloudflare Workers (Hono framework)
+- Desktop Connector: Node.js, WebSocket, local AI models
 - Database: D1 (SQLite), Vectorize (vector search), R2 (storage), KV (cache)
-- AI: Cloudflare Workers AI (Whisper, Llama, BGE embeddings)
+- AI: Cloudflare Workers AI (Whisper, Llama, BGE) + Local (Ollama, ComfyUI, A1111)
 
 ---
 
@@ -58,6 +69,8 @@ For detailed implementation guidance, patterns, and research, see:
 | Topic | Document |
 |-------|----------|
 | **Getting Started** | `docs/ONBOARDING.md` |
+| **Desktop Connector** | `docs/DESKTOP-CONNECTOR.md` |
+| **Self-Improvement System** | `docs/SELF-IMPROVEMENT.md` |
 | **AI Agent Architecture** | `docs/EMERGENT-AGENT-ARCHITECTURES.md` |
 | **Voice Features** | `docs/EMERGENT-VOICE-PATTERNS.md` |
 | **Mobile Development** | `docs/MOBILE-DEVELOPMENT-PATTERNS.md` |
@@ -66,6 +79,7 @@ For detailed implementation guidance, patterns, and research, see:
 | **Analytics & Monitoring** | `docs/ANALYTICS-OBSERVABILITY.md` |
 | **CI/CD Pipeline** | `docs/CICD-AUTOMATION-PATTERNS.md`, `docs/CICD-SETUP-GUIDE.md` |
 | **Gamification** | `docs/GAMIFICATION-PATTERNS.md` |
+| **Roadmap** | `docs/ROADMAP.md` |
 
 ---
 
@@ -106,18 +120,55 @@ npm run db:migrate:test   # Set up test database
 
 ```
 makerlog-ai/
-├── src/                    # React frontend
-│   ├── VoiceChat.tsx       # Main voice interface
-│   ├── Dashboard.tsx       # Quota tracking & tasks
-│   └── main.tsx            # App entry point
-├── workers/api/            # Cloudflare Worker (Hono)
+├── src/                          # React frontend
+│   ├── VoiceChat.tsx             # Main voice interface
+│   ├── Dashboard.tsx             # Quota tracking & tasks
+│   └── main.tsx                  # App entry point
+├── workers/api/                  # Cloudflare Worker (Hono)
 │   └── src/
-│       ├── routes/         # API endpoints
-│       ├── agents/         # AI agent system
-│       └── middleware/     # Request processing
-├── schema/                 # D1 database migrations
-├── docs/                   # Detailed documentation
-└── .github/workflows/      # CI/CD pipelines
+│       ├── routes/               # API endpoints
+│       ├── agents/               # AI agent system
+│       ├── websocket/            # WebSocket for desktop connector
+│       └── middleware/           # Request processing
+├── packages/
+│   ├── desktop-connector/        # Node.js desktop daemon
+│   │   ├── src/
+│   │   │   ├── index.ts          # Main connector
+│   │   │   ├── generators/       # Local AI integrations
+│   │   │   ├── learning/         # Self-improvement system
+│   │   │   └── storage/          # Asset management
+│   │   ├── package.json
+│   │   └── README.md
+│   └── db/                       # Database package
+│       ├── migrations/
+│       ├── seeds/
+│       └── schema.sql
+├── schema/                       # D1 database migrations
+├── docs/                         # Detailed documentation
+└── .github/workflows/            # CI/CD pipelines
+```
+
+### Hybrid Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                           USER'S WORKFLOW                                    │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│  PHONE (Daytime)              DESKTOP (Overnight)         CLOUD (Always)    │
+│  ─────────────────           ──────────────────          ───────────────    │
+│  • Voice capture             • Heavy generation           • Coordination    │
+│  • Quick QC                  • Iteration loops            • Vector DB       │
+│  • Approve/reject            • Local models               • User prefs      │
+│  • Fine-tune prompts         • File organization          • Quota tracking  │
+│                              • Watch for changes          • Sync state      │
+│                                                                              │
+│  ───────────────────────────────────────────────────────────────────────    │
+│                           FEEDBACK LOOP                                      │
+│                                                                              │
+│   Generate → Review → [Keep/Project/Future/Prune] → Learn → Better Prompts  │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ### Key API Endpoints
@@ -128,8 +179,29 @@ makerlog-ai/
 | `GET/POST /api/conversations` | Conversation management |
 | `POST /api/search` | Semantic vector search |
 | `GET /api/opportunities` | List detected generative tasks |
-| `POST /api/harvest` | Execute all queued tasks |
+| `POST /api/harvest` | Execute all queued tasks (cloud) |
 | `GET /api/quota` | Real-time quota tracking |
+| `WebSocket /api/ws` | Desktop connector real-time sync |
+
+### Desktop Connector
+
+**Installation:** `npm install -g makerlog-connector`
+
+**Features:**
+- Connects to cloud via WebSocket for task distribution
+- Runs local AI models (Ollama, ComfyUI, Automatic1111)
+- Self-improving style profiles from user feedback
+- Overnight batch execution with idle detection
+- Automatic storage management and pruning
+
+**CLI Commands:**
+```bash
+makerlog-connector start     # Start the daemon
+makerlog-connector config    # Configure connection
+makerlog-connector status    # Show status
+```
+
+See `docs/DESKTOP-CONNECTOR.md` for complete documentation.
 
 ---
 
@@ -148,7 +220,7 @@ makerlog-ai/
 - `VECTORIZE` - Semantic search index
 
 ### Database Schema
-Key tables: `users`, `conversations`, `messages`, `tasks`, `opportunities`, `achievements`
+Key tables: `users`, `conversations`, `messages`, `tasks`, `opportunities`, `achievements`, `style_profiles`, `generated_assets`, `user_feedback`
 
 ---
 
@@ -244,6 +316,32 @@ See `docs/GAMIFICATION-PATTERNS.md` for design principles and roadmap.
 - Neuron reduction: 40-50% through optimization
 
 See `docs/PERFORMANCE-OPTIMIZATION.md` for comprehensive strategies, code examples, and monitoring setup.
+
+---
+
+## Self-Improvement System
+
+**Core Concept:** The system learns from user feedback to improve future generations.
+
+**Feedback Loop:**
+1. Generate asset (image/text/code)
+2. User reviews: 1-5 stars + disposition (project/library/prune)
+3. System learns: Style vectors, prompt modifiers, preferences
+4. Next generation: Enhanced prompts based on learned profile
+
+**Style Profile:**
+- **Positive examples**: Assets rated 4-5 stars
+- **Negative examples**: Assets rated 1-2 stars
+- **Preference vector**: Learned direction in embedding space
+- **Prompt modifiers**: Tags and phrases added to prompts automatically
+
+**Asset Lifecycle:**
+- **Cache**: Temporary generation results (auto-pruned)
+- **Project**: Assets for current project
+- **Library**: Assets saved for future projects
+- **Prune**: Marked for deletion when storage is full
+
+See `docs/SELF-IMPROVEMENT.md` for complete documentation.
 
 ---
 

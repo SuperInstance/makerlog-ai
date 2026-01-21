@@ -338,6 +338,177 @@ CREATE TABLE IF NOT EXISTS user_settings (
 );
 
 -- ============================================================================
+-- GENERATED_ASSETS TABLE
+-- ============================================================================
+-- Stores metadata for all generated assets (images, text, code)
+-- Supports both cloud and desktop-generated assets
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS generated_assets (
+  -- Primary key: UUID v4
+  id TEXT PRIMARY KEY,
+
+  -- User who owns this asset
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+
+  -- Source task that generated this asset
+  task_id TEXT,
+
+  -- Desktop connector that generated this (NULL for cloud generation)
+  desktop_connector_id TEXT,
+
+  -- Asset type
+  type TEXT NOT NULL CHECK(type IN ('image', 'text', 'code')),
+
+  -- Storage location (could be R2 URL or local path)
+  storage_url TEXT NOT NULL,
+
+  -- Storage backend: 'r2' or 'local'
+  storage_backend TEXT NOT NULL CHECK(storage_backend IN ('r2', 'local')),
+
+  -- Content hash for deduplication
+  content_hash TEXT NOT NULL,
+
+  -- Generation metadata (JSON)
+  -- Includes: prompt, model, parameters, generation time, etc.
+  metadata TEXT NOT NULL,
+
+  -- Optional: Iteration parent (if this is a refinement of another asset)
+  parent_asset_id TEXT REFERENCES generated_assets(id) ON DELETE SET NULL,
+  iteration_number INTEGER,
+
+  -- Style vector embedding (computed from prompt/content)
+  -- Used for self-improvement learning
+  style_vector TEXT, -- JSON array of floats
+
+  -- Asset lifecycle disposition
+  disposition TEXT CHECK(disposition IN ('cache', 'project', 'library', 'pruned')),
+
+  -- File metadata
+  file_size_bytes INTEGER,
+  mime_type TEXT,
+
+  -- Timestamps
+  created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+  updated_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now'))
+);
+
+-- Indexes
+CREATE INDEX IF NOT EXISTS idx_generated_assets_user ON generated_assets(user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_generated_assets_type ON generated_assets(user_id, type, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_generated_assets_task ON generated_assets(task_id);
+CREATE INDEX IF NOT EXISTS idx_generated_assets_disposition ON generated_assets(user_id, disposition, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_generated_assets_hash ON generated_assets(content_hash);
+
+-- ============================================================================
+-- USER_FEEDBACK TABLE
+-- ============================================================================
+-- Stores user feedback on generated assets for self-improvement learning
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS user_feedback (
+  -- Primary key: UUID v4
+  id TEXT PRIMARY KEY,
+
+  -- User who provided feedback
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+
+  -- Asset being rated
+  asset_id TEXT NOT NULL REFERENCES generated_assets(id) ON DELETE CASCADE,
+
+  -- Star rating (1-5)
+  rating INTEGER NOT NULL CHECK(rating >= 1 AND rating <= 5),
+
+  -- Disposition decision
+  disposition TEXT NOT NULL CHECK(disposition IN ('project', 'library', 'prune')),
+
+  -- Optional: User-added tags for learning
+  tags TEXT, -- JSON array of strings
+
+  -- Optional: Natural language refinements
+  refinements TEXT,
+
+  -- Timestamp
+  created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+
+  -- Unique: one feedback per asset per user
+  UNIQUE(user_id, asset_id)
+);
+
+-- Indexes
+CREATE INDEX IF NOT EXISTS idx_user_feedback_user ON user_feedback(user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_user_feedback_asset ON user_feedback(asset_id);
+CREATE INDEX IF NOT EXISTS idx_user_feedback_rating ON user_feedback(rating, created_at DESC);
+
+-- ============================================================================
+-- STYLE_PROFILES TABLE
+-- ============================================================================
+-- Stores self-improvement learning data for each user
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS style_profiles (
+  -- Primary key: user_id (one profile per user)
+  user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+
+  -- Preference vector: 512-dimensional direction vector
+  -- Computed from positive/negative example embeddings
+  preference_vector TEXT NOT NULL, -- JSON array of floats
+
+  -- Learned prompt modifiers automatically added to generations
+  prompt_modifiers TEXT NOT NULL, -- JSON array of strings
+
+  -- Counts for tracking learning progress
+  positive_example_count INTEGER NOT NULL DEFAULT 0,
+  negative_example_count INTEGER NOT NULL DEFAULT 0,
+
+  -- Learning parameters
+  feedback_weight REAL NOT NULL DEFAULT 0.3,
+
+  -- Timestamp
+  updated_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now'))
+);
+
+-- Index
+CREATE INDEX IF NOT EXISTS idx_style_profiles_updated ON style_profiles(updated_at DESC);
+
+-- ============================================================================
+-- STYLE_PROFILE_EXAMPLES TABLE
+-- ============================================================================
+-- Stores individual examples (embeddings) that make up the style profile
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS style_profile_examples (
+  -- Primary key: UUID v4
+  id TEXT PRIMARY KEY,
+
+  -- User relationship
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+
+  -- Asset being used as example
+  asset_id TEXT NOT NULL REFERENCES generated_assets(id) ON DELETE CASCADE,
+
+  -- Example type: positive (liked) or negative (disliked)
+  example_type TEXT NOT NULL CHECK(example_type IN ('positive', 'negative')),
+
+  -- The embedding vector (512-dimensional)
+  embedding TEXT NOT NULL, -- JSON array of floats
+
+  -- Timestamp
+  created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now'))
+);
+
+-- Indexes for sliding window queries
+CREATE INDEX IF NOT EXISTS idx_style_examples_user_type ON style_profile_examples(user_id, example_type, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_style_examples_user_created ON style_profile_examples(user_id, created_at DESC);
+
+-- Trigger: Update style profile counts when example is added
+CREATE TRIGGER IF NOT EXISTS update_style_profile_counts
+AFTER INSERT ON style_profile_examples
+BEGIN
+  UPDATE style_profiles
+  SET positive_example_count = positive_example_count + (CASE WHEN NEW.example_type = 'positive' THEN 1 ELSE 0 END),
+      negative_example_count = negative_example_count + (CASE WHEN NEW.example_type = 'negative' THEN 1 ELSE 0 END),
+      updated_at = NEW.created_at
+  WHERE user_id = NEW.user_id;
+END;
+
+-- ============================================================================
 -- ANALYTICS_EVENTS TABLE (Optional - for privacy-first analytics)
 -- ============================================================================
 -- Stores anonymized analytics events (no user IDs, no voice content)

@@ -1,0 +1,49 @@
+{
+  "name": "makerlog-connector",
+  "version": "1.0.0",
+  "description": "Makerlog Desktop Connector - local AI generation daemon",
+  "main": "dist/index.js",
+  "bin": {
+    "makerlog-connector": "./dist/cli.js"
+  },
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "start": "node dist/cli.js start",
+    "test": "vitest",
+    "lint": "eslint src/"
+  },
+  "keywords": [
+    "makerlog",
+    "ai",
+    "desktop",
+    "connector",
+    "ollama",
+    "comfyui",
+    "stable-diffusion"
+  ],
+  "author": "Makerlog.ai",
+  "license": "MIT",
+  "dependencies": {
+    "conf": "^12.0.0",
+    "ws": "^8.18.0",
+    "openai": "^4.71.1",
+    "axios": "^1.7.9",
+    "chalk": "^5.4.1",
+    "ora": "^8.1.1",
+    "yargs": "^17.7.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@types/ws": "^8.5.13",
+    "@types/yargs": "^17.0.33",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8",
+    "eslint": "^9.17.0",
+    "tsx": "^4.19.2"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

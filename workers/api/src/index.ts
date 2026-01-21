@@ -35,6 +35,7 @@
 
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
+import { randomUUID } from 'crypto';
 
 interface Env {
   DB: D1Database;
@@ -871,5 +872,388 @@ app.get('/api/digest', async (c) => {
     opportunityCount: (opportunities.results || []).length,
   });
 });
+
+// ============ WEBSOCKET ENDPOINTS FOR DESKTOP CONNECTOR ============
+
+// WebSocket upgrade handler
+// Note: Cloudflare Workers requires special handling for WebSocket
+// The client connects to: wss://api.makerlog.ai/api/ws
+export interface WebSocketMessage {
+  type: string;
+  payload: any;
+}
+
+export interface DesktopConnector {
+  id: string;
+  userId: string;
+  capabilities: {
+    localModels: {
+      ollama: { enabled: boolean; endpoint: string; models: string[] };
+      comfyui: { enabled: boolean; endpoint: string };
+      automatic1111: { enabled: boolean; endpoint: string };
+    };
+    compute: {
+      maxConcurrentJobs: number;
+      preferLocal: boolean;
+      overnightOnly: boolean;
+    };
+    learning: { enabled: boolean };
+    storageAvailableGB: number;
+  };
+  ws: WebSocket;
+  lastSeen: number;
+}
+
+// In-memory store for connected desktop connectors (in production, use Durable Objects)
+const connectedConnectors = new Map<string, DesktopConnector>();
+
+// WebSocket upgrade endpoint
+app.get('/api/ws', async (c) => {
+  // Check if this is a WebSocket upgrade request
+  const upgradeHeader = c.req.header('Upgrade');
+  if (upgradeHeader !== 'websocket') {
+    return c.json({ error: 'Expected WebSocket upgrade request' }, 400);
+  }
+
+  // Extract authentication
+  const authHeader = c.req.header('Authorization') || '';
+  const userId = c.req.header('X-User-Id') || '';
+
+  if (!authHeader.startsWith('Bearer ') || !userId) {
+    return c.json({ error: 'Missing authentication' }, 401);
+  }
+
+  const apiKey = authHeader.replace('Bearer ', '');
+
+  // Verify API key (you'd validate against your user database)
+  const isValidKey = await validateApiKey(c.env, userId, apiKey);
+  if (!isValidKey) {
+    return c.json({ error: 'Invalid API key' }, 403);
+  }
+
+  // Create WebSocket pair (Cloudflare Workers specific)
+  // In production, use the `upgradeWebSocket` helper
+  return c.json({ message: 'WebSocket endpoint - requires dedicated WebSocket handler' });
+});
+
+// REST endpoints for desktop connector (fallback for WebSocket unavailable)
+
+// POST /api/desktop-connector/register - Register a desktop connector
+app.post('/api/desktop-connector/register', async (c) => {
+  const userId = c.req.header('X-User-Id')!;
+  const { connectorId, capabilities } = await c.req.json() as {
+    connectorId: string;
+    capabilities: DesktopConnector['capabilities'];
+  };
+
+  // Store connector info (in production, use Durable Objects or D1)
+  const connector: DesktopConnector = {
+    id: connectorId,
+    userId,
+    capabilities,
+    ws: null as any, // WebSocket connection
+    lastSeen: Date.now(),
+  };
+
+  connectedConnectors.set(connectorId, connector);
+
+  // Return pending tasks
+  const pendingTasks = await c.env.DB.prepare(`
+    SELECT * FROM tasks
+    WHERE user_id = ? AND status = 'queued'
+    ORDER BY priority DESC, created_at ASC
+    LIMIT 50
+  `).bind(userId).all();
+
+  return c.json({
+    connectorId,
+    registered: true,
+    tasks: pendingTasks.results || [],
+  });
+});
+
+// POST /api/desktop-connector/heartbeat - Keep-alive heartbeat
+app.post('/api/desktop-connector/heartbeat', async (c) => {
+  const { connectorId } = await c.req.json() as { connectorId: string };
+
+  const connector = connectedConnectors.get(connectorId);
+  if (connector) {
+    connector.lastSeen = Date.now();
+    return c.json({ status: 'ok' });
+  }
+
+  return c.json({ error: 'Connector not found' }, 404);
+});
+
+// POST /api/desktop-connector/task-completed - Report task completion
+app.post('/api/desktop-connector/task-completed', async (c) => {
+  const userId = c.req.header('X-User-Id')!;
+  const { taskId, asset, styleVector } = await c.req.json() as {
+    taskId: string;
+    asset: {
+      id: string;
+      type: string;
+      storageUrl: string;
+      contentHash: string;
+      metadata: string;
+    };
+    styleVector?: number[];
+  };
+
+  // Update task status
+  await c.env.DB.prepare(`
+    UPDATE tasks
+    SET status = 'completed',
+        result_url = ?,
+        completed_at = strftime('%s', 'now')
+    WHERE id = ?
+  `).bind(asset.storageUrl, taskId).run();
+
+  // Store generated asset metadata
+  await c.env.DB.prepare(`
+    INSERT INTO generated_assets (
+      id, user_id, type, storage_url, storage_backend, content_hash,
+      metadata, style_vector, disposition, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, 'r2', ?, ?, ?, ?, 'cache', strftime('%s', 'now'), strftime('%s', 'now'))
+  `).bind(
+    asset.id,
+    userId,
+    asset.type,
+    asset.storageUrl,
+    asset.contentHash,
+    asset.metadata,
+    styleVector ? JSON.stringify(styleVector) : null,
+    'cache'
+  ).run();
+
+  // Award XP for task completion
+  const xpReward = 50; // 50 XP per task
+  await c.env.DB.prepare(`
+    UPDATE users
+    SET xp = xp + ?,
+        updated_at = strftime('%s', 'now')
+    WHERE id = ?
+  `).bind(xpReward, userId).run();
+
+  return c.json({ success: true, xpAwarded: xpReward });
+});
+
+// POST /api/desktop-connector/task-failed - Report task failure
+app.post('/api/desktop-connector/task-failed', async (c) => {
+  const { taskId, error } = await c.req.json() as {
+    taskId: string;
+    error: string;
+  };
+
+  await c.env.DB.prepare(`
+    UPDATE tasks
+    SET status = 'failed',
+        error_message = ?,
+        retry_count = retry_count + 1
+    WHERE id = ?
+  `).bind(error, taskId).run();
+
+  return c.json({ success: true });
+});
+
+// POST /api/desktop-connector/feedback - Submit user feedback
+app.post('/api/desktop-connector/feedback', async (c) => {
+  const userId = c.req.header('X-User-Id')!;
+  const { assetId, feedback } = await c.req.json() as {
+    assetId: string;
+    feedback: {
+      rating: number;
+      disposition: string;
+      tags?: string[];
+      refinements?: string;
+    };
+  };
+
+  // Store feedback
+  await c.env.DB.prepare(`
+    INSERT INTO user_feedback (id, user_id, asset_id, rating, disposition, tags, refinements, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, strftime('%s', 'now'))
+  `).bind(
+    randomUUID(),
+    userId,
+    assetId,
+    feedback.rating,
+    feedback.disposition,
+    feedback.tags ? JSON.stringify(feedback.tags) : null,
+    feedback.refinements || null
+  ).run();
+
+  // Trigger style profile update (async, don't wait)
+  updateStyleProfile(c.env, userId, assetId, feedback);
+
+  return c.json({ success: true });
+});
+
+// GET /api/desktop-connector/style-profile - Get user's style profile
+app.get('/api/desktop-connector/style-profile', async (c) => {
+  const userId = c.req.header('X-User-Id')!;
+
+  const profile = await c.env.DB.prepare(`
+    SELECT * FROM style_profiles WHERE user_id = ?
+  `).bind(userId).first();
+
+  if (!profile) {
+    // Return default profile
+    return c.json({
+      userId,
+      preferenceVector: new Array(512).fill(0),
+      promptModifiers: [],
+      positiveExampleCount: 0,
+      negativeExampleCount: 0,
+    });
+  }
+
+  return c.json({
+    userId: profile.user_id,
+    preferenceVector: JSON.parse(profile.preference_vector),
+    promptModifiers: JSON.parse(profile.prompt_modifiers),
+    positiveExampleCount: profile.positive_example_count,
+    negativeExampleCount: profile.negative_example_count,
+  });
+});
+
+// POST /api/desktop-connector/iteration - Request iteration on asset
+app.post('/api/desktop-connector/iteration', async (c) => {
+  const userId = c.req.header('X-User-Id')!;
+  const { assetId, refinements } = await c.req.json() as {
+    assetId: string;
+    refinements: string;
+  };
+
+  // Get original asset
+  const asset = await c.env.DB.prepare(`
+    SELECT * FROM generated_assets WHERE id = ?
+  `).bind(assetId).first();
+
+  if (!asset) {
+    return c.json({ error: 'Asset not found' }, 404);
+  }
+
+  // Parse metadata
+  const metadata = JSON.parse(asset.metadata);
+
+  // Create iteration task
+  const taskId = randomUUID();
+  await c.env.DB.prepare(`
+    INSERT INTO tasks (id, user_id, type, prompt, status, priority, cost_estimate, created_at)
+    VALUES (?, ?, 'iteration', ?, 'queued', 8, 0.5, strftime('%s', 'now'))
+  `).bind(taskId, userId, refinements).run();
+
+  // Store iteration metadata
+  await c.env.DB.prepare(`
+    UPDATE tasks
+    SET refined_prompt = ?
+    WHERE id = ?
+  `).bind(`Iteration of ${assetId}: ${refinements}`, taskId).run();
+
+  // In production, would push this to the desktop connector via WebSocket
+  // For now, return the task info
+  return c.json({
+    taskId,
+    status: 'queued',
+    message: 'Iteration queued - will be processed by desktop connector',
+  });
+});
+
+// ============ HELPER FUNCTIONS ============
+
+async function validateApiKey(env: Env, userId: string, apiKey: string): Promise<boolean> {
+  // In production, validate against users table
+  const user = await env.DB.prepare(`
+    SELECT id FROM users WHERE id = ? AND cloudflare_api_key = ?
+  `).bind(userId, apiKey).first();
+
+  return !!user;
+}
+
+async function updateStyleProfile(env: Env, userId: string, assetId: string, feedback: any): Promise<void> {
+  // Get the asset with its embedding
+  const asset = await env.DB.prepare(`
+    SELECT * FROM generated_assets WHERE id = ?
+  `).bind(assetId).first();
+
+  if (!asset || !asset.style_vector) {
+    return;
+  }
+
+  const styleVector = JSON.parse(asset.style_vector);
+  const rating = feedback.rating;
+  const weight = 0.3;
+
+  // Get current profile
+  let profile = await env.DB.prepare(`
+    SELECT * FROM style_profiles WHERE user_id = ?
+  `).bind(userId).first();
+
+  if (!profile) {
+    // Create new profile
+    await env.DB.prepare(`
+      INSERT INTO style_profiles (user_id, preference_vector, prompt_modifiers, updated_at)
+      VALUES (?, ?, ?, strftime('%s', 'now'))
+    `).bind(userId, JSON.stringify(new Array(512).fill(0)), '[]').run();
+
+    profile = {
+      user_id: userId,
+      preference_vector: JSON.stringify(new Array(512).fill(0)),
+      prompt_modifiers: '[]',
+      positive_example_count: 0,
+      negative_example_count: 0,
+    };
+  }
+
+  const preferenceVector = JSON.parse(profile.preference_vector);
+  const promptModifiers = JSON.parse(profile.prompt_modifiers);
+
+  // Update preference vector based on rating
+  if (rating >= 4) {
+    // Move toward this asset's style
+    const newVector = preferenceVector.map((v: number, i: number) =>
+      v + weight * (styleVector[i] - v)
+    );
+
+    // Normalize
+    const magnitude = Math.sqrt(newVector.reduce((sum: number, v: number) => sum + v * v, 0));
+    const normalizedVector = magnitude > 0
+      ? newVector.map(v => v / magnitude)
+      : newVector;
+
+    // Add tags to prompt modifiers
+    if (feedback.tags) {
+      for (const tag of feedback.tags) {
+        if (!promptModifiers.includes(tag)) {
+          promptModifiers.push(tag);
+        }
+      }
+    }
+  } else if (rating <= 2) {
+    // Move away from this asset's style
+    const newVector = preferenceVector.map((v: number, i: number) =>
+      v - weight * (styleVector[i] - v)
+    );
+
+    const magnitude = Math.sqrt(newVector.reduce((sum: number, v: number) => sum + v * v, 0));
+    const normalizedVector = magnitude > 0
+      ? newVector.map(v => v / magnitude)
+      : newVector;
+  }
+
+  // Save updated profile
+  await env.DB.prepare(`
+    UPDATE style_profiles
+    SET preference_vector = ?,
+        prompt_modifiers = ?,
+        updated_at = strftime('%s', 'now')
+    WHERE user_id = ?
+  `).bind(
+    JSON.stringify(preferenceVector),
+    JSON.stringify(promptModifiers),
+    userId
+  ).run();
+}
 
 export default app;
