@@ -413,6 +413,45 @@ See `docs/EMERGENT-AGENT-ARCHITECTURES.md` for complete research and implementat
 
 **Research Document**: See `docs/EMERGENT-VOICE-PATTERNS.md` for comprehensive research on voice interaction patterns, technologies, and implementation guides.
 
+## Edge Computing Patterns
+
+**Research Document**: See `docs/EDGE-COMPUTING-PATTERNS.md` for comprehensive research on edge computing optimization patterns for Cloudflare Workers.
+
+**Key Patterns Identified**:
+
+1. **Request Coalescing & Batching** - Combine similar requests within a time window to batch AI calls, reducing quota by 40-60%
+2. **Multi-Layer Edge Caching** - Hierarchical caching across KV, CDN, and browser with content-specific TTLs
+3. **Geographic Distribution Optimization** - Smart routing based on user location with region-aware model selection
+4. **Edge Function Composition** - Break complex workflows into composable functions with continuation patterns for timeouts
+5. **Streaming Response Pattern** - Stream AI responses and task updates via SSE for better UX
+6. **Durable Objects for Stateful Operations** - Real-time features like live quota tracking and collaborative opportunity review
+7. **Cold Start Mitigation** - Keep workers warm with scheduled pings to reduce first-request latency
+8. **Memory-Efficient Streaming** - Handle large files by streaming directly to R2 without buffering
+
+**Edge Constraints**:
+- CPU Time: 30 seconds (hard limit)
+- Memory: 128MB per worker
+- No persistent state between invocations
+- Model availability varies by region
+
+**Priority Edge Features for 3-6 Month Implementation**:
+
+1. **Smart Opportunity Caching** (2-3 weeks) - Edge-side caching with incremental analysis
+2. **Real-Time Quota Dashboard** (3-4 weeks) - Live quota tracking via Durable Objects and WebSockets
+3. **Collaborative Opportunity Review** (4-5 weeks) - Multi-user real-time sessions for reviewing opportunities
+
+**Implementation Roadmap**:
+- Phase 1 (Weeks 1-2): Foundation - Caching and coalescing
+- Phase 2 (Weeks 3-4): Streaming & Composition
+- Phase 3 (Weeks 5-8): Real-Time Features with Durable Objects
+- Phase 4 (Weeks 9-10): Optimization & geographic distribution
+
+**Expected Outcomes**:
+- 40-50% reduction in neuron consumption
+- 50-100ms latency improvement for global users
+- Real-time collaboration capabilities
+- Foundation for advanced edge features
+
 **Key Patterns Identified**:
 1. **Full-Duplex Conversations with Barge-In** - Natural interruptible voice interactions using WebRTC VAD
 2. **Emotionally Responsive Voice AI** - Detect user emotion and adapt TTS/response accordingly
@@ -465,6 +504,141 @@ const VOICE_MODELS = {
 - Fallback mechanisms when premium voice services unavailable
 
 See `docs/EMERGENT-VOICE-PATTERNS.md` for code examples, implementation checklists, and detailed technology recommendations.
+
+## Gamification & Engagement
+
+### Current Gamification Features
+- **XP & Leveling System**: Users earn XP through tasks and harvests
+- **Streak Tracking**: Daily harvest streaks with visual feedback
+- **Achievements**: Milestone badges (First Harvest, Perfect Day, Week Warrior, etc.)
+- **Progress Dashboard**: Visual display of level, XP, and achievements
+
+### Gamification Philosophy
+
+**Research Document**: See `docs/GAMIFICATION-PATTERNS.md` for comprehensive research on developer-focused gamification, AI-powered personalization, and sustainable engagement strategies.
+
+**Core Principles**:
+
+1. **Developer Motivation**
+   - Developers are motivated by **mastery, autonomy, and efficiency** - not childish rewards
+   - Focus on **quality over quantity** - meaningful contributions, not token activity
+   - Recognize **technical excellence** and **problem-solving skills**
+   - Provide **professional** recognition that aligns with developer identity
+
+2. **AI-Powered Personalization**
+   - **Adaptive difficulty**: Adjust challenge complexity based on user skill level
+   - **Personalized quests**: AI generates contextually relevant challenges
+   - **Smart recommendations**: Suggest achievements aligned with user interests
+   - **Flow state optimization**: Keep users in the challenge-skill balance zone
+
+3. **Sustainable Engagement**
+   - **Burnout prevention**: Implement streak forgiveness and rest days
+   - **Quality metrics**: Reward meaningful work, not just activity
+   - **Anti-gaming measures**: Detect and discourage low-effort participation
+   - **Transparent progress**: Clear expectations, no manipulative FOMO
+
+4. **Ethical Implementation**
+   - **No dark patterns**: Avoid artificial scarcity, predatory monetization, addictive design
+   - **Privacy-first**: Collect minimal data, provide user control
+   - **Inclusivity**: Accessible to all skill levels, neurodiverse-friendly
+   - **Opt-in social features**: Leaderboards and competition are optional
+
+### Gamification Guidelines for Development
+
+**When Adding New Gamification Features**:
+
+1. **Ask These Questions**:
+   - Does this recognize meaningful contributions (not just activity)?
+   - Is this inclusive to developers of all skill levels?
+   - Could this encourage burnout or obsessive behavior?
+   - Is the reward system transparent and fair?
+   - Can users opt-out if they choose?
+
+2. **Anti-Patterns to Avoid**:
+   - ❌ "First to complete" achievements (favors time zones, not skill)
+   - ❌ Leaderboards that can't be opted out of
+   - ❌ Randomized rewards (loot boxes)
+   - ❌ Artificial urgency without genuine time constraints
+   - ❌ Punishing streak breaks (use grace periods instead)
+   - ❌ Requiring real money for gameplay advantages
+
+3. **Recommended Patterns**:
+   - ✅ Quality-based achievements (code quality, success rate)
+   - ✅ Skill trees and learning paths
+   - ✅ Personalized quests based on user's tech stack
+   - ✅ Streak freezes and grace periods
+   - ✅ Seasonal events with alternative paths
+   - ✅ Community collaboration and mentorship
+
+### Current Implementation
+
+**Database Schema**:
+```sql
+-- Users track XP, level, and streaks
+CREATE TABLE users (
+  id TEXT PRIMARY KEY,
+  xp INTEGER DEFAULT 0,
+  level INTEGER DEFAULT 1,
+  streak_days INTEGER DEFAULT 0,
+  last_harvest_at INTEGER
+);
+
+-- Achievements track milestone unlocks
+CREATE TABLE achievements (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  achievement_type TEXT NOT NULL,
+  xp_awarded INTEGER NOT NULL,
+  unlocked_at INTEGER NOT NULL,
+  FOREIGN KEY (user_id) REFERENCES users(id)
+);
+```
+
+**Current Achievements**:
+- `first_harvest`: Complete your first harvest (100 XP)
+- `perfect_day`: 100% quota usage in one day (500 XP)
+- `time_saver`: Save 10 hours total (1000 XP)
+- `streak_7`: 7-day harvest streak (2000 XP)
+- `hundred_tasks`: Complete 100 tasks (1500 XP)
+
+**XP Formula**:
+```typescript
+// Level calculation: level = floor(sqrt(xp / 100)) + 1
+const newLevel = Math.floor(Math.sqrt(user.xp / 100)) + 1;
+
+// XP rewards:
+// - Task completed: 50 XP
+// - Achievement unlocked: 100-2000 XP (varies by rarity)
+// - Perfect harvest: 500 XP bonus
+```
+
+### Future Gamification Roadmap
+
+**Phase 1: Enhanced Core** (Planned)
+- Adaptive difficulty based on user performance
+- Skill tree system for technical progression
+- Improved streak system with grace periods
+- Quality scoring for generated code/assets
+
+**Phase 2: Social Features** (Planned)
+- Opt-in leaderboards (global, friends, tech stack)
+- Collaborative building sessions
+- Community quest marketplace
+- User profiles with achievement showcases
+
+**Phase 3: Advanced Features** (Planned)
+- AI-powered personalized quest generation
+- Seasonal events and challenges
+- Portfolio generation from achievements
+- Mentorship and community leadership
+
+**See `docs/GAMIFICATION-PATTERNS.md` for**:
+- Detailed case studies (GitHub, Duolingo, StackOverflow)
+- AI-powered gamification patterns
+- Anti-burnout strategies
+- Engagement metrics and analytics
+- Implementation roadmap with phases
+- Ethical guidelines and dark pattern avoidance
 
 ## Repository
 
