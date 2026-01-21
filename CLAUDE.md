@@ -151,11 +151,30 @@ Before development:
 
 ## Testing
 
-Currently no formal test framework is configured. The application relies on:
-- Manual testing via browser + worker dev servers
-- Wrangler's built-in error handling
-- TypeScript for type safety
-- Cloudflare's production environment for integration testing
+**Recommended Testing Stack:**
+- **Frontend Unit Tests**: Vitest + React Testing Library
+- **Worker Unit Tests**: Vitest + @cloudflare/vitest-pool-workers
+- **Integration Tests**: Miniflare + Wrangler Dev for local D1/R2/AI testing
+- **E2E Tests**: Playwright (native Workers support)
+- **AI Mocking**: MSW (Mock Service Worker) for network-level interception
+
+**Test Commands:**
+```bash
+npm run test              # Run all tests with Vitest
+npm run test:ui           # Vitest UI mode
+npm run test:coverage     # Coverage report
+npm run test:unit         # Frontend unit tests only
+npm run test:worker       # Worker unit tests only
+npm run test:e2e          # Playwright E2E tests
+npm run db:migrate:test   # Set up test D1 database
+```
+
+**Testing Strategy:**
+- Test AI-dependent code with mocked responses (MSW)
+- Use real bindings in integration tests via @cloudflare/vitest-pool-workers
+- Implement database seed files for consistent test data
+- Mock external dependencies (AI models, R2 uploads)
+- Test error handling and retry logic with fault injection
 
 ## Deployment Notes
 
@@ -163,6 +182,37 @@ Currently no formal test framework is configured. The application relies on:
 - Worker deploys independently via `wrangler deploy`
 - Database migrations require manual execution
 - Vectorize index must be created before deployment
+
+## Production Readiness
+
+### Error Handling
+- **Retry Logic**: Exponential backoff with jitter for transient failures
+- **Circuit Breaker**: Prevent cascading failures from AI model errors
+- **Graceful Degradation**: Fallback responses when AI services unavailable
+- **Timeout Management**: Configurable timeouts per AI model type
+
+### Security
+- **Input Validation**: Comprehensive validation for all AI inputs
+- **Content Moderation**: Llama Guard 3 for unsafe content detection
+- **Rate Limiting**: Per-user and per-IP limits via Cloudflare Rate Limiter
+- **Prompt Injection Protection**: Firewall for AI rules
+
+### Monitoring
+- **Workers Observability**: OpenTelemetry integration for traces and metrics
+- **Custom Metrics**: Track AI requests, errors, latency, neuron usage
+- **Alerting**: Critical alerts for quota thresholds, error rates, latency
+- **Logging**: Structured JSON logs for all AI operations
+
+### Cost Management
+- **Daily Quota Tracking**: Monitor neuron usage with alerts at 80%/95%
+- **Smart Caching**: AI Gateway cache with appropriate TTLs
+- **Model Selection**: Use smaller models when appropriate
+
+### Accessibility (WCAG 2.2 Level AA)
+- **Multi-Modal Design**: Text/visual/haptic alternatives to voice-only
+- **Real-Time Captioning**: Live captions for voice content (< 2s delay)
+- **Screen Reader Support**: Full keyboard navigation and ARIA labels
+- **Audio Control**: User-controllable TTS playback with volume/rate controls
 
 ## Repository
 
