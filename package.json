@@ -1,0 +1,33 @@
+{
+  "name": "makerlog-ai",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Gamified quota harvesting for Cloudflare free tier users",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "api:dev": "cd workers/api && npm run dev",
+    "api:deploy": "cd workers/api && npm run deploy",
+    "deploy:all": "npm run build && npm run api:deploy && wrangler pages deploy dist --project-name makerlog-dashboard",
+    "db:migrate": "wrangler d1 execute makerlog-db --file=./packages/db/schema.sql"
+  },
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "devDependencies": {
+    "@types/react": "^18.2.0",
+    "@types/react-dom": "^18.2.0",
+    "@vitejs/plugin-react": "^4.2.0",
+    "autoprefixer": "^10.4.16",
+    "postcss": "^8.4.32",
+    "tailwindcss": "^3.4.0",
+    "typescript": "^5.3.0",
+    "vite": "^5.0.0",
+    "wrangler": "^3.0.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

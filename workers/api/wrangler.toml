@@ -1,0 +1,38 @@
+name = "makerlog-api"
+main = "src/index.ts"
+compatibility_date = "2024-12-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Route configuration (update with your domain)
+# routes = [
+#   { pattern = "api.makerlog.ai/*", zone_name = "makerlog.ai" }
+# ]
+
+[ai]
+binding = "AI"
+
+[[kv_namespaces]]
+binding = "KV"
+id = "cd2b23e7003d43f2afb9bf53c2cbbcb3"  # makerlog-cache
+
+[[r2_buckets]]
+binding = "ASSETS"
+bucket_name = "makerlog-assets"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "makerlog-db"
+database_id = "e8540ce2-a898-4669-8afe-00fe04c1eb41"
+
+# Vectorize for semantic search across conversations
+[[vectorize]]
+binding = "VECTORIZE"
+index_name = "makerlog-conversations"
+
+[vars]
+ENVIRONMENT = "production"
+
+# Development overrides
+[env.dev]
+name = "makerlog-api-dev"
+vars = { ENVIRONMENT = "development" }
