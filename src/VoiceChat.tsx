@@ -46,151 +46,6 @@ const API_BASE = '/api';
 
 // ============ HOOKS ============
 
-function useVoiceRecorder() {
-  const [isRecording, setIsRecording] = useState(false);
-  const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [recordingState, setRecordingState] = useState<RecordingState>({
-    isRecording: false,
-    startedAt: null,
-    duration: 0,
-  });
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const chunksRef = useRef<Blob[]>([]);
-  const wakeLockRef = useRef<WakeLockSentinel | null>(null);
-  const durationIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  const audioContextRef = useRef<AudioContext | null>(null);
-
-  // Play beep tone for audio feedback
-  const playBeep = useCallback((frequency: number, duration: number) => {
-    if (!audioContextRef.current) {
-      audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
-    }
-    const ctx = audioContextRef.current;
-    const oscillator = ctx.createOscillator();
-    const gainNode = ctx.createGain();
-
-    oscillator.connect(gainNode);
-    gainNode.connect(ctx.destination);
-
-    oscillator.frequency.value = frequency;
-    oscillator.type = 'sine';
-
-    gainNode.gain.setValueAtTime(0.1, ctx.currentTime);
-    gainNode.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + duration / 1000);
-
-    oscillator.start(ctx.currentTime);
-    oscillator.stop(ctx.currentTime + duration / 1000);
-  }, []);
-
-  // Trigger haptic feedback
-  const triggerHaptic = useCallback((pattern: number | number[]) => {
-    if ('vibrate' in navigator) {
-      navigator.vibrate(pattern);
-    }
-  }, []);
-
-  const startRecording = useCallback(async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mediaRecorder = new MediaRecorder(stream, {
-        mimeType: 'audio/webm;codecs=opus',
-      });
-
-      mediaRecorderRef.current = mediaRecorder;
-      chunksRef.current = [];
-
-      mediaRecorder.ondataavailable = (e) => {
-        if (e.data.size > 0) {
-          chunksRef.current.push(e.data);
-        }
-      };
-
-      mediaRecorder.onstop = () => {
-        const blob = new Blob(chunksRef.current, { type: 'audio/webm' });
-        setAudioBlob(blob);
-        stream.getTracks().forEach((track) => track.stop());
-
-        // Play stop beep (lower frequency)
-        playBeep(600, 100);
-        // Haptic feedback for stop
-        triggerHaptic([20, 50, 20]);
-      };
-
-      mediaRecorder.start(100); // Collect data every 100ms
-
-      const startedAt = Date.now();
-      setIsRecording(true);
-      setRecordingState({
-        isRecording: true,
-        startedAt,
-        duration: 0,
-      });
-      setError(null);
-
-      // Play start beep (higher frequency)
-      playBeep(800, 100);
-      // Haptic feedback for start
-      triggerHaptic(10);
-
-      // Request wake lock to prevent screen sleep
-      if ('wakeLock' in navigator) {
-        try {
-          wakeLockRef.current = await (navigator as any).wakeLock.request('screen');
-        } catch (err) {
-          console.warn('Wake lock request failed:', err);
-        }
-      }
-
-      // Start duration tracking
-      durationIntervalRef.current = setInterval(() => {
-        setRecordingState((prev) => ({
-          ...prev,
-          duration: Math.floor((Date.now() - startedAt) / 1000),
-        }));
-      }, 100);
-
-    } catch (err) {
-      setError('Microphone access denied');
-      console.error('Failed to start recording:', err);
-    }
-  }, [playBeep, triggerHaptic]);
-
-  const stopRecording = useCallback(() => {
-    if (mediaRecorderRef.current && isRecording) {
-      mediaRecorderRef.current.stop();
-      setIsRecording(false);
-      setRecordingState({
-        isRecording: false,
-        startedAt: null,
-        duration: 0,
-      });
-
-      // Clear duration interval
-      if (durationIntervalRef.current) {
-        clearInterval(durationIntervalRef.current);
-        durationIntervalRef.current = null;
-      }
-
-      // Release wake lock
-      if (wakeLockRef.current) {
-        wakeLockRef.current.release();
-        wakeLockRef.current = null;
-      }
-    }
-  }, [isRecording]);
-
-  return {
-    isRecording,
-    audioBlob,
-    error,
-    startRecording,
-    stopRecording,
-    setAudioBlob,
-    recordingState,
-  };
-}
-
 /**
  * Progressive recording hook that uploads chunks during recording.
  * This prevents data loss if the app crashes or loses connection.
@@ -209,8 +64,8 @@ function useProgressiveRecorder() {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const wakeLockRef = useRef<WakeLockSentinel | null>(null);
-  const durationIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  const uploadIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const durationIntervalRef = useRef<number | null>(null);
+  const uploadIntervalRef = useRef<number | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const recordingIdRef = useRef<string | null>(null);
   const chunkIndexRef = useRef(0);
@@ -301,7 +156,7 @@ function useProgressiveRecorder() {
     }
   }, [API_BASE]);
 
-  const startRecording = useCallback(async (conversationId?: string) => {
+  const startRecording = useCallback(async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const mediaRecorder = new MediaRecorder(stream, {
@@ -1445,7 +1300,6 @@ function GamificationPanel() {
 function NotificationPanel() {
   const {
     notifications,
-    unreadCount,
     markAsRead,
     clearAll,
   } = useNotifications();
@@ -1508,7 +1362,7 @@ export default function VoiceChat() {
   const { isRecording, isProcessing, error, transcript, recordingState, startRecording, stopRecording, setTranscript } = useProgressiveRecorder();
   const { isSpeaking, speak, stop: stopSpeaking } = useSpeechSynthesis();
   const { screenshot, analyzing, analysis, analyzeScreenshot, clearScreenshot } = useScreenshotPaste();
-  const { notifications, unreadCount, requestPermission } = useNotifications();
+  const { requestPermission } = useNotifications();
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // Scroll to bottom when messages change
@@ -1580,11 +1434,11 @@ export default function VoiceChat() {
   };
 
   const handleRecordingStart = useCallback(() => {
-    startRecording(currentConversationId || undefined);
-  }, [startRecording, currentConversationId]);
+    startRecording();
+  }, [startRecording]);
 
   const handleRecordingStop = useCallback(async () => {
-    const result = await stopRecording(currentConversationId || undefined);
+    const result = await stopRecording();
 
     if (result) {
       // Update conversation ID if new
@@ -1695,7 +1549,7 @@ export default function VoiceChat() {
     }
   };
 
-  const handleSearchResultClick = (conversationId: string, messageId: string) => {
+  const handleSearchResultClick = (conversationId: string) => {
     setCurrentConversationId(conversationId);
     setShowSearch(false);
   };
@@ -1963,6 +1817,6 @@ export default function VoiceChat() {
 
     {/* Notifications */}
     <NotificationPanel />
-    </div>
+    </React.Fragment>
   );
 }

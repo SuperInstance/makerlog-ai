@@ -5,7 +5,7 @@
  * Shows quota usage, task queue, and achievements.
  */
 
-import React, { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 
 // Types
 interface QuotaUsage {

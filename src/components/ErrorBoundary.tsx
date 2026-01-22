@@ -5,7 +5,7 @@
  * displays fallback UI, and logs errors for monitoring.
  */
 
-import React, { Component, ErrorInfo, ReactNode } from 'react';
+import { Component, ErrorInfo, ReactNode } from 'react';
 
 interface Props {
   children: ReactNode;

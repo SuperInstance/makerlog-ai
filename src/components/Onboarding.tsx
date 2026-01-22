@@ -4,7 +4,7 @@
  * First-run experience for new users.
  */
 
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 
 interface OnboardingProps {
   onComplete: () => void;
