@@ -1267,6 +1267,178 @@ function useScreenshotPaste() {
   };
 }
 
+// ============ GAMIFICATION PANEL ============
+
+interface Achievement {
+  id: string;
+  user_id: string;
+  achievement_type: string;
+  xp_awarded: number;
+  unlocked_at: number;
+}
+
+interface UserData {
+  xp: number;
+  level: number;
+  streak_days: number;
+}
+
+interface GamificationData {
+  user: UserData;
+  unlocked: Achievement[];
+  available: Record<string, { name: string; description: string; xp: number; icon: string }>;
+}
+
+function GamificationPanel() {
+  const [data, setData] = useState<GamificationData | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  const fetchData = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch('/api/achievements');
+      const result = await res.json();
+      setData(result);
+    } catch (e) {
+      console.error('Failed to fetch achievements:', e);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchData();
+  }, []);
+
+  // Calculate progress to next level
+  const getLevelProgress = () => {
+    if (!data) return { current: 0, target: 100, percentage: 0 };
+    const currentLevel = data.user.level;
+    const currentXP = data.user.xp;
+    // Level formula: level = floor(sqrt(xp / 100)) + 1
+    // So: xp = (level - 1)^2 * 100
+    const currentLevelXP = Math.pow(currentLevel - 1, 2) * 100;
+    const nextLevelXP = Math.pow(currentLevel, 2) * 100;
+    const progressInLevel = currentXP - currentLevelXP;
+    const requiredForNext = nextLevelXP - currentLevelXP;
+    const percentage = Math.min((progressInLevel / requiredForNext) * 100, 100);
+
+    return { current: progressInLevel, target: requiredForNext, percentage };
+  };
+
+  const levelProgress = getLevelProgress();
+
+  return (
+    <div className="h-full flex flex-col bg-slate-900">
+      <div className="p-4 border-b border-slate-700">
+        <h2 className="text-lg font-bold text-white mb-3">🏆 Achievements</h2>
+      </div>
+
+      <div className="flex-1 overflow-y-auto p-4">
+        {loading ? (
+          <div className="text-center text-slate-500">Loading...</div>
+        ) : data ? (
+          <div className="space-y-4">
+            {/* Level & XP */}
+            <div className="bg-gradient-to-br from-blue-900/50 to-purple-900/50 rounded-lg p-4 border border-blue-700/50">
+              <div className="flex items-center justify-between mb-2">
+                <div>
+                  <p className="text-xs text-slate-400">Level</p>
+                  <p className="text-3xl font-bold text-white">{data.user.level}</p>
+                </div>
+                <div className="text-right">
+                  <p className="text-xs text-slate-400">Total XP</p>
+                  <p className="text-xl font-bold text-yellow-400">{data.user.xp.toLocaleString()}</p>
+                </div>
+              </div>
+              <div className="mt-3">
+                <div className="flex justify-between text-xs text-slate-400 mb-1">
+                  <span>Progress to Level {data.user.level + 1}</span>
+                  <span>{Math.round(levelProgress.percentage)}%</span>
+                </div>
+                <div className="w-full bg-slate-700 rounded-full h-2">
+                  <div
+                    className="bg-gradient-to-r from-blue-500 to-purple-500 h-2 rounded-full transition-all"
+                    style={{ width: `${levelProgress.percentage}%` }}
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Streak */}
+            <div className="bg-slate-800 rounded-lg p-4 flex items-center justify-between">
+              <div>
+                <p className="text-xs text-slate-400">Current Streak</p>
+                <p className="text-2xl font-bold text-orange-400 flex items-center gap-2">
+                  🔥 {data.user.streak_days} day{data.user.streak_days !== 1 ? 's' : ''}
+                </p>
+              </div>
+              {data.user.streak_days >= 7 && (
+                <span className="text-2xl">🏆</span>
+              )}
+            </div>
+
+            {/* Unlocked Achievements */}
+            <div>
+              <h3 className="text-sm font-medium text-slate-400 mb-2">Unlocked ({data.unlocked.length})</h3>
+              <div className="space-y-2">
+                {data.unlocked.map((achievement) => {
+                  const meta = data.available[achievement.achievement_type];
+                  if (!meta) return null;
+                  return (
+                    <div
+                      key={achievement.id}
+                      className="bg-green-900/20 border border-green-700/50 rounded-lg p-3 flex items-center gap-3"
+                    >
+                      <span className="text-2xl">{meta.icon}</span>
+                      <div className="flex-1">
+                        <p className="text-sm font-medium text-white">{meta.name}</p>
+                        <p className="text-xs text-slate-400">{meta.description}</p>
+                      </div>
+                      <span className="text-xs bg-yellow-500/20 text-yellow-400 px-2 py-1 rounded">
+                        +{meta.xp} XP
+                      </span>
+                    </div>
+                  );
+                })}
+                {data.unlocked.length === 0 && (
+                  <p className="text-xs text-slate-500">No achievements yet. Keep recording!</p>
+                )}
+              </div>
+            </div>
+
+            {/* Available Achievements */}
+            <div>
+              <h3 className="text-sm font-medium text-slate-400 mb-2">Locked</h3>
+              <div className="space-y-2">
+                {Object.entries(data.available)
+                  .filter(([key]) => !data.unlocked.some((a) => a.achievement_type === key))
+                  .map(([key, meta]) => (
+                    <div
+                      key={key}
+                      className="bg-slate-800 rounded-lg p-3 flex items-center gap-3 opacity-60"
+                    >
+                      <span className="text-2xl grayscale">{meta.icon}</span>
+                      <div className="flex-1">
+                        <p className="text-sm font-medium text-slate-300">{meta.name}</p>
+                        <p className="text-xs text-slate-500">{meta.description}</p>
+                      </div>
+                      <span className="text-xs text-slate-500 px-2 py-1 rounded">
+                        +{meta.xp} XP
+                      </span>
+                    </div>
+                  ))}
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="text-center text-slate-500">Failed to load achievements</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ============ MAIN VOICE CHAT COMPONENT ============
 
 export default function VoiceChat() {
@@ -1280,6 +1452,7 @@ export default function VoiceChat() {
   const [selectedLogDate, setSelectedLogDate] = useState(new Date().toISOString().split('T')[0]);
   const [showSearch, setShowSearch] = useState(false);
   const [showQuota, setShowQuota] = useState(false);
+  const [showGamification, setShowGamification] = useState(false);
 
   // Hooks - Using progressive recorder for chunked uploads
   const { isRecording, isProcessing, error, transcript, recordingState, startRecording, stopRecording, setTranscript } = useProgressiveRecorder();
@@ -1505,7 +1678,24 @@ export default function VoiceChat() {
           <div className="flex gap-2">
             <button
               onClick={() => {
+                setShowGamification(!showGamification);
+                setShowQuota(false);
+                setShowSearch(false);
+                setShowDailyLog(false);
+                setShowOpportunities(false);
+              }}
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
+                showGamification
+                  ? 'bg-yellow-500 text-white'
+                  : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+              }`}
+            >
+              🏆 Achievements
+            </button>
+            <button
+              onClick={() => {
                 setShowQuota(!showQuota);
+                setShowGamification(false);
                 setShowSearch(false);
                 setShowDailyLog(false);
                 setShowOpportunities(false);
@@ -1521,9 +1711,10 @@ export default function VoiceChat() {
             <button
               onClick={() => {
                 setShowSearch(!showSearch);
+                setShowGamification(false);
+                setShowQuota(false);
                 setShowDailyLog(false);
                 setShowOpportunities(false);
-                setShowQuota(false);
               }}
               className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
                 showSearch
@@ -1536,6 +1727,7 @@ export default function VoiceChat() {
             <button
               onClick={() => {
                 setShowDailyLog(!showDailyLog);
+                setShowGamification(false);
                 setShowOpportunities(false);
                 setShowSearch(false);
                 setShowQuota(false);
@@ -1551,6 +1743,7 @@ export default function VoiceChat() {
             <button
               onClick={() => {
                 setShowOpportunities(!showOpportunities);
+                setShowGamification(false);
                 setShowDailyLog(false);
                 setShowSearch(false);
                 setShowQuota(false);
@@ -1656,7 +1849,13 @@ export default function VoiceChat() {
           )}
 
           {/* Side Panels */}
-          {showQuota && (
+          {showGamification && (
+            <div className="w-96 border-l border-slate-700 overflow-hidden">
+              <GamificationPanel />
+            </div>
+          )}
+
+          {showQuota && !showGamification && (
             <div className="w-80 border-l border-slate-700 overflow-hidden">
               <QuotaDashboard />
             </div>
