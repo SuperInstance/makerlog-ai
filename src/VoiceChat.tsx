@@ -538,7 +538,37 @@ function RecordButton({
   );
 }
 
-function MessageBubble({ message, onPlayAudio }: { message: Message; onPlayAudio?: () => void }) {
+function MessageBubble({ message }: { message: Message }) {
+  const [isPlaying, setIsPlaying] = React.useState(false);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  const handlePlayAudio = () => {
+    if (message.audioUrl) {
+      if (audioRef.current) {
+        if (isPlaying) {
+          audioRef.current.pause();
+        } else {
+          audioRef.current.play();
+        }
+      } else {
+        const audio = new Audio(message.audioUrl);
+        audioRef.current = audio;
+        audio.onended = () => setIsPlaying(false);
+        audio.play();
+      }
+      setIsPlaying(!isPlaying);
+    }
+  };
+
+  React.useEffect(() => {
+    return () => {
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current = null;
+      }
+    };
+  }, []);
+
   const isUser = message.role === 'user';
   
   return (
@@ -560,10 +590,11 @@ function MessageBubble({ message, onPlayAudio }: { message: Message; onPlayAudio
           </span>
           {message.audioUrl && (
             <button
-              onClick={onPlayAudio}
-              className="text-xs opacity-60 hover:opacity-100 ml-2"
+              onClick={handlePlayAudio}
+              className="text-xs opacity-60 hover:opacity-100 ml-2 flex items-center gap-1"
             >
-              🔊
+              {isPlaying ? '⏸️' : '🔊'}
+              {isPlaying && <span className="text-xs">Playing...</span>}
             </button>
           )}
         </div>
@@ -911,6 +942,260 @@ function DailyLogPanel({
   );
 }
 
+interface SearchResult {
+  id: string;
+  score: number;
+  metadata: {
+    user_id: string;
+    conversation_id: string;
+    content: string;
+    timestamp: number;
+  };
+}
+
+function SearchPanel({
+  onResultClick,
+}: {
+  onResultClick: (conversationId: string, messageId: string) => void;
+}) {
+  const [query, setQuery] = useState('');
+  const [results, setResults] = useState<SearchResult[]>([]);
+  const [searching, setSearching] = useState(false);
+
+  const performSearch = async () => {
+    if (!query.trim()) return;
+
+    setSearching(true);
+    try {
+      const res = await fetch('/api/search', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query, limit: 20 }),
+      });
+
+      const data = await res.json();
+      setResults(data.results || []);
+    } catch (e) {
+      console.error('Search failed:', e);
+    } finally {
+      setSearching(false);
+    }
+  };
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    performSearch();
+  };
+
+  return (
+    <div className="h-full flex flex-col bg-slate-900">
+      {/* Search input */}
+      <div className="p-4 border-b border-slate-700">
+        <h2 className="text-lg font-bold text-white mb-3">Semantic Search</h2>
+        <form onSubmit={handleSubmit} className="flex gap-2">
+          <input
+            type="text"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="What did I say about..."
+            className="flex-1 bg-slate-800 text-white border border-slate-600 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500"
+          />
+          <button
+            type="submit"
+            disabled={searching}
+            className="bg-blue-500 hover:bg-blue-400 text-white px-4 py-2 rounded-lg text-sm transition disabled:opacity-50"
+          >
+            {searching ? '...' : '🔍'}
+          </button>
+        </form>
+      </div>
+
+      {/* Results */}
+      <div className="flex-1 overflow-y-auto p-4">
+        {results.length === 0 && !searching && (
+          <div className="text-center text-slate-500 text-sm">
+            Search your conversations by meaning, not just keywords.
+          </div>
+        )}
+
+        {results.map((result) => (
+          <div
+            key={result.id}
+            onClick={() =>
+              onResultClick(result.metadata.conversation_id, result.id)
+            }
+            className="bg-slate-800 rounded-lg p-3 mb-2 cursor-pointer hover:bg-slate-700 transition"
+          >
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs bg-green-500/20 text-green-400 px-2 py-0.5 rounded">
+                {Math.round(result.score * 100)}% match
+              </span>
+              <span className="text-xs text-slate-500">
+                {new Date(result.metadata.timestamp * 1000).toLocaleDateString()}
+              </span>
+            </div>
+            <p className="text-sm text-slate-300 line-clamp-3">
+              {result.metadata.content}
+            </p>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+interface QuotaData {
+  images: { used: number; limit: number; remaining: number };
+  tokens: { used: number; limit: number; remaining: number };
+  resetAt: string;
+}
+
+function QuotaDashboard() {
+  const [quota, setQuota] = useState<QuotaData | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  const fetchQuota = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch('/api/quota');
+      const data = await res.json();
+      setQuota(data);
+    } catch (e) {
+      console.error('Failed to fetch quota:', e);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchQuota();
+    // Refresh every 30 seconds
+    const interval = setInterval(fetchQuota, 30000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Calculate time until reset
+  const getTimeUntilReset = () => {
+    if (!quota) return '';
+    const resetTime = new Date(quota.resetAt);
+    const now = new Date();
+    const diff = resetTime.getTime() - now.getTime();
+
+    if (diff <= 0) return 'Resets soon';
+
+    const hours = Math.floor(diff / (1000 * 60 * 60));
+    const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+    return `${hours}h ${minutes}m`;
+  };
+
+  // Calculate overall percentage
+  const getOverallPercentage = () => {
+    if (!quota) return 0;
+    const imagePercent = (quota.images.used / quota.images.limit) * 100;
+    const tokenPercent = (quota.tokens.used / quota.tokens.limit) * 100;
+    return Math.round((imagePercent + tokenPercent) / 2);
+  };
+
+  return (
+    <div className="h-full flex flex-col bg-slate-900">
+      <div className="p-4 border-b border-slate-700">
+        <h2 className="text-lg font-bold text-white mb-3">Quota Dashboard</h2>
+        <div className="flex items-center justify-between text-xs text-slate-400">
+          <span>Resets in: {getTimeUntilReset()}</span>
+          <button onClick={fetchQuota} className="text-blue-400 hover:text-blue-300">
+            Refresh
+          </button>
+        </div>
+      </div>
+
+      <div className="flex-1 overflow-y-auto p-4">
+        {loading ? (
+          <div className="text-center text-slate-500">Loading...</div>
+        ) : quota ? (
+          <div className="space-y-4">
+            {/* Overall Usage */}
+            <div className="bg-slate-800 rounded-lg p-4">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-sm text-white font-medium">Overall Usage</span>
+                <span className="text-2xl font-bold text-blue-400">
+                  {getOverallPercentage()}%
+                </span>
+              </div>
+              <div className="w-full bg-slate-700 rounded-full h-2">
+                <div
+                  className="bg-blue-500 h-2 rounded-full transition-all"
+                  style={{ width: `${Math.min(getOverallPercentage(), 100)}%` }}
+                />
+              </div>
+            </div>
+
+            {/* Image Generation */}
+            <div className="bg-slate-800 rounded-lg p-4">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-sm text-white">🎨 Image Generation</span>
+                <span className="text-sm text-slate-400">
+                  {quota.images.used} / {quota.images.limit}
+                </span>
+              </div>
+              <div className="w-full bg-slate-700 rounded-full h-2">
+                <div
+                  className="bg-purple-500 h-2 rounded-full transition-all"
+                  style={{
+                    width: `${Math.min(
+                      (quota.images.used / quota.images.limit) * 100,
+                      100
+                    )}%`,
+                  }}
+                />
+              </div>
+              <p className="text-xs text-slate-500 mt-2">
+                {quota.images.remaining} remaining
+              </p>
+            </div>
+
+            {/* Text Generation */}
+            <div className="bg-slate-800 rounded-lg p-4">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-sm text-white">📝 Text Generation</span>
+                <span className="text-sm text-slate-400">
+                  {quota.tokens.used.toLocaleString()} / {quota.tokens.limit.toLocaleString()}
+                </span>
+              </div>
+              <div className="w-full bg-slate-700 rounded-full h-2">
+                <div
+                  className="bg-green-500 h-2 rounded-full transition-all"
+                  style={{
+                    width: `${Math.min(
+                      (quota.tokens.used / quota.tokens.limit) * 100,
+                      100
+                    )}%`,
+                  }}
+                />
+              </div>
+              <p className="text-xs text-slate-500 mt-2">
+                {quota.tokens.remaining.toLocaleString()} remaining
+              </p>
+            </div>
+
+            {/* Efficiency */}
+            <div className="bg-slate-800 rounded-lg p-4">
+              <span className="text-sm text-white block mb-2">⚡ Efficiency</span>
+              <p className="text-xs text-slate-400">
+                Your quota usage is {getOverallPercentage() > 80 ? 'high' : getOverallPercentage() > 50 ? 'moderate' : 'low'}.
+                {getOverallPercentage() > 90 && ' Consider harvesting soon!'}
+              </p>
+            </div>
+          </div>
+        ) : (
+          <div className="text-center text-slate-500">
+            Failed to load quota data
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ============ MAIN VOICE CHAT COMPONENT ============
 
 export default function VoiceChat() {
@@ -922,6 +1207,8 @@ export default function VoiceChat() {
   const [showOpportunities, setShowOpportunities] = useState(false);
   const [showDailyLog, setShowDailyLog] = useState(false);
   const [selectedLogDate, setSelectedLogDate] = useState(new Date().toISOString().split('T')[0]);
+  const [showSearch, setShowSearch] = useState(false);
+  const [showQuota, setShowQuota] = useState(false);
 
   // Hooks - Using progressive recorder for chunked uploads
   const { isRecording, isProcessing, error, transcript, recordingState, startRecording, stopRecording, setTranscript } = useProgressiveRecorder();
@@ -1112,6 +1399,11 @@ export default function VoiceChat() {
     }
   };
 
+  const handleSearchResultClick = (conversationId: string, messageId: string) => {
+    setCurrentConversationId(conversationId);
+    setShowSearch(false);
+  };
+
   return (
     <div className="flex h-screen bg-slate-900">
       {/* Sidebar */}
@@ -1141,8 +1433,40 @@ export default function VoiceChat() {
           <div className="flex gap-2">
             <button
               onClick={() => {
+                setShowQuota(!showQuota);
+                setShowSearch(false);
+                setShowDailyLog(false);
+                setShowOpportunities(false);
+              }}
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
+                showQuota
+                  ? 'bg-orange-500 text-white'
+                  : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+              }`}
+            >
+              ⚡ Quota
+            </button>
+            <button
+              onClick={() => {
+                setShowSearch(!showSearch);
+                setShowDailyLog(false);
+                setShowOpportunities(false);
+                setShowQuota(false);
+              }}
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
+                showSearch
+                  ? 'bg-purple-500 text-white'
+                  : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+              }`}
+            >
+              🔍 Search
+            </button>
+            <button
+              onClick={() => {
                 setShowDailyLog(!showDailyLog);
                 setShowOpportunities(false);
+                setShowSearch(false);
+                setShowQuota(false);
               }}
               className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
                 showDailyLog
@@ -1156,6 +1480,8 @@ export default function VoiceChat() {
               onClick={() => {
                 setShowOpportunities(!showOpportunities);
                 setShowDailyLog(false);
+                setShowSearch(false);
+                setShowQuota(false);
               }}
               className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
                 showOpportunities
@@ -1215,7 +1541,19 @@ export default function VoiceChat() {
           </div>
 
           {/* Side Panels */}
-          {showDailyLog && (
+          {showQuota && (
+            <div className="w-80 border-l border-slate-700 overflow-hidden">
+              <QuotaDashboard />
+            </div>
+          )}
+
+          {showSearch && !showQuota && (
+            <div className="w-96 border-l border-slate-700 overflow-hidden">
+              <SearchPanel onResultClick={handleSearchResultClick} />
+            </div>
+          )}
+
+          {showDailyLog && !showSearch && (
             <div className="w-96 border-l border-slate-700 overflow-hidden">
               <DailyLogPanel
                 selectedDate={selectedLogDate}
