@@ -4,6 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Table of Contents
 
+- [Current Priorities](#current-priorities)
 - [Project Overview](#project-overview)
 - [Product Philosophy](#product-philosophy)
 - [Quick Start](#quick-start)
@@ -15,67 +16,98 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ---
 
+## Current Priorities
+
+> **Strategic Focus (January 2026):** Ship Makerlog.ai first. Studylog.ai is deferred.
+>
+> See `docs/plans/VISION-REFINEMENT-2026.md` and `docs/plans/STRATEGIC-DECISIONS.md` for full rationale.
+
+### What We're Building NOW
+
+**Makerlog.ai** - Voice-first AI assistant that captures ideas throughout the day and turns them into real outputs overnight.
+
+**Core Value Prop:** "Talk through your day. Wake up to results."
+
+1. **Capture** - Voice input during commute, walks, downtime
+2. **Detect** - AI identifies things you mentioned wanting to create
+3. **Generate** - Automatic execution overnight
+4. **Deliver** - Wake up to images, code, content ready for review
+
+### What's Descoped (For Now)
+
+| Feature | Reason |
+|---------|--------|
+| Studylog.ai (kids platform) | COPPA complexity; validate adult market first |
+| Desktop connector | No user demand signal yet |
+| Module/add-on system | Premature abstraction |
+| Advanced memory (Engram, HNSW) | Research, not product feature |
+
+### 4-Week Ship Target
+
+- **Week 1-2:** Complete core loop + auth
+- **Week 3:** Search UI, daily logs, basic gamification
+- **Week 4:** Launch, monitor, iterate
+
+---
+
 ## Project Overview
 
-**Makerlog.ai** and **Studylog.ai** are two voice-first AI platforms built on shared infrastructure:
+**Makerlog.ai** is a voice-first AI platform for adults (18+).
 
-### Studylog.ai (Under-18)
-Kid-friendly AI learning platform with parent/teacher supervision. Students learn through voice conversations, with daily quota limits and approval workflows for sensitive requests.
+> *Note: Studylog.ai (under-18 platform) is documented but deferred until Makerlog.ai is validated.*
 
 ### Makerlog.ai (Adults, 18+)
-Voice-first development assistant that gamifies Cloudflare free tier quota harvesting. Users talk through ideas during the day, and the system automatically detects generative opportunities that execute overnight.
+Voice-first AI assistant that captures your ideas through conversation and automatically generates outputs overnight. Users talk through ideas during the day, and the system detects generative opportunities that execute in the background.
 
-**Shared Infrastructure:**
+**Core Features:**
 - Voice capture with push-to-talk recording
-- Cloudflare account linking (users bring their own quota)
-- All 9 Cloudflare AI models accessible
-- Quota gamification (XP, leveling, achievements, streaks)
-- Markdown memory with semantic search
-
-**MVP-First Philosophy:**
-Start with core features only. Everything else becomes a modular add-on that users can enable as needed.
+- Speech-to-text transcription (Whisper)
+- Opportunity detection (AI identifies tasks from conversation)
+- Task queue with batch execution
+- Generated asset storage and retrieval
+- Semantic search across conversations
+- Basic gamification (XP, levels)
 
 **Tech Stack:**
 - Frontend: React 18, TypeScript, Vite, Tailwind CSS
 - Backend: Cloudflare Workers (Hono framework)
 - Database: D1 (SQLite), Vectorize (vector search), R2 (storage), KV (cache)
-- AI: Cloudflare Workers AI (all 9 models)
+- AI: Cloudflare Workers AI (Whisper, Llama, SDXL, BGE)
 
-**Monetization:**
-- Studylog.ai: Tutorial videos (non-intrusive)
-- Makerlog.ai: Banner ads (unobtrusive)
+**Monetization:** Deferred until product-market fit validation (100+ WAU)
 
 ---
 
 ## Product Philosophy
 
-### "The Microsoft Problem"
+### Ship One Product Well
 
-**Principle:** Don't design for imaginary "middle users" who don't exist.
+**Principle:** One great product beats two mediocre ones.
 
-Apple creates specific products for specific users (iPhone, iPad, Mac). Microsoft creates bloated products for imaginary "average" users.
+The original vision included Studylog.ai (kids) and Makerlog.ai (adults) as dual platforms. Strategic analysis revealed this violated our own "Microsoft Problem" principle - building "shared infrastructure" for two audiences creates exactly the bloated middle-ground we wanted to avoid.
 
-**Our Approach:**
-- **Studylog.ai**: Designed specifically for kids (8-17), with COPPA compliance, parental oversight, and age-appropriate UI
-- **Makerlog.ai**: Designed specifically for adults (18+), with voice-first workflow and developer-focused gamification
-- **No "middle user"**: Each product serves its specific audience perfectly
+**Current Approach:**
+- **Makerlog.ai**: Full focus on voice-first workflow for adults
+- **Studylog.ai**: Deferred until Makerlog is validated with real users
+- **Ship fast**: 4 weeks to launch, not 12
 
-### MVP + Add-Ons
+### MVP Only - No Premature Abstraction
 
-**Core MVP Features** (both platforms):
-1. Cloudflare account access (users' own storage/quota)
-2. Long-running voice recorder with intelligent segmentation
-3. STT/TTS system for hands-free dialogue
-4. Quota gamification system
-5. All 9 Cloudflare AI models accessible
+**Core MVP Features:**
+1. Voice recording with transcription
+2. Opportunity detection from conversation
+3. Task queue with batch execution
+4. Basic auth (email/password)
+5. Semantic search
+6. Daily logs viewer
+7. Basic gamification (XP, level)
 
-**Modular Add-Ons** (enabled as needed):
-- Threaded conversations
-- AI-powered summaries
-- Desktop connector (local AI acceleration)
-- Advanced memory (Engram O(1) lookup, HNSW indexing)
-- Recursive Language Models (RLM)
-- Agent swarms and hierarchical planning
+**Explicitly Descoped:**
+- Module/add-on system (no add-ons exist to use it)
+- Desktop connector (no demand signal)
+- Threaded conversations (complexity without clear value)
+- Advanced memory systems (research, not product)
+- COPPA compliance (no kids platform yet)
 
 **Progressive Enhancement:**
 - Basic users get simple, fast experience
@@ -112,19 +144,20 @@ npm run deploy:all
 
 ## Essential Reference Docs
 
-### MVP Platform Definition
+### Strategic Direction (Start Here)
 | Topic | Document |
 |-------|----------|
-| **Studylog.ai Platform** | `docs/research/STUDYLOG-KIDS-PLATFORM.md` |
+| **Vision Refinement** | `docs/plans/VISION-REFINEMENT-2026.md` |
+| **Strategic Decisions** | `docs/plans/STRATEGIC-DECISIONS.md` |
 | **Makerlog.ai MVP** | `docs/research/MAKERLOG-MVP-VOICE-FIRST.md` |
-| **Implementation Roadmap** | `docs/plans/IMPLEMENTATION-ROADMAP.md` |
 
-### Modular Architecture
+### Deferred (Reference Only)
 | Topic | Document |
 |-------|----------|
-| **Add-On Architecture** | `docs/research/MODULAR-ADDON-ARCHITECTURE.md` |
-| **Feature Flags** | `docs/research/FEATURE-FLAG-SYSTEM.md` |
-| **Module Development** | `docs/research/MODULE-DEVELOPMENT-GUIDE.md` |
+| **Studylog.ai Platform** | `docs/research/STUDYLOG-KIDS-PLATFORM.md` *(deferred)* |
+| **Original Roadmap** | `docs/plans/IMPLEMENTATION-ROADMAP.md` *(superseded)* |
+| **Add-On Architecture** | `docs/research/MODULAR-ADDON-ARCHITECTURE.md` *(descoped)* |
+| **Module Development** | `docs/research/MODULE-DEVELOPMENT-GUIDE.md` *(descoped)* |
 
 ### Integration & Patterns
 | Topic | Document |
@@ -282,6 +315,14 @@ makerlog-ai/
 
 ## Modular Add-On System
 
+> **Status: DESCOPED for MVP**
+>
+> The module system is designed but not implemented. Focus is on shipping core functionality first.
+> This section is retained for future reference only.
+
+<details>
+<summary>Original design (click to expand)</summary>
+
 ### Three-Layer Feature Flags
 
 **Layer 1: Static (Build-time)**
@@ -321,7 +362,7 @@ export interface MakerlogModule {
 }
 ```
 
-### Add-On Catalog
+### Add-On Catalog (Future)
 
 **Tier 1 Add-Ons** ($5/month or usage-based):
 - Threaded Conversations - Multi-thread chat UI
@@ -337,6 +378,8 @@ export interface MakerlogModule {
 - Recursive Language Models - Unlimited context reasoning
 - Real-Time Collaboration - Multi-user sessions
 - Custom Voice Personas - ElevenLabs integration
+
+</details>
 
 ### Developing Add-Ons
 
