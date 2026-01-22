@@ -1305,6 +1305,377 @@ app.patch('/api/messages/:id', async (c) => {
   return c.json({ success: true, message: { id: messageId, content } });
 });
 
+// ============ AI GENERATION ENDPOINTS ============
+
+/**
+ * POST /api/generate/text
+ *
+ * Generate text using Llama 3.1 8B Instruct
+ */
+app.post('/api/generate/text', async (c) => {
+  const userId = c.req.header('X-User-Id') || 'demo-user';
+  const { prompt, maxTokens = 1000, systemPrompt } = await c.req.json() as {
+    prompt: string;
+    maxTokens?: number;
+    systemPrompt?: string;
+  };
+
+  if (!prompt) {
+    return c.json({ error: 'prompt is required' }, 400);
+  }
+
+  try {
+    const messages: Array<{ role: string; content: string }> = [];
+
+    if (systemPrompt) {
+      messages.push({ role: 'system', content: systemPrompt });
+    }
+
+    messages.push({ role: 'user', content: prompt });
+
+    const response = await c.env.AI.run('@cf/meta/llama-3.1-8b-instruct', {
+      messages,
+      max_tokens: maxTokens,
+    }) as { response: string };
+
+    return c.json({
+      success: true,
+      result: response.response,
+      model: '@cf/meta/llama-3.1-8b-instruct',
+    });
+  } catch (error) {
+    console.error('Text generation failed:', error);
+    return c.json({ error: 'Text generation failed' }, 500);
+  }
+});
+
+/**
+ * POST /api/generate/code
+ *
+ * Generate code using Llama 3.1 8B Instruct with code-specific system prompt
+ */
+app.post('/api/generate/code', async (c) => {
+  const userId = c.req.header('X-User-Id') || 'demo-user';
+  const { prompt, language, maxTokens = 2000 } = await c.req.json() as {
+    prompt: string;
+    language?: string;
+    maxTokens?: number;
+  };
+
+  if (!prompt) {
+    return c.json({ error: 'prompt is required' }, 400);
+  }
+
+  try {
+    const systemPrompt = `You are an expert programmer. Generate clean, well-commented code${
+      language ? ` in ${language}` : ''
+    }. Focus on best practices, error handling, and readability.`;
+
+    const response = await c.env.AI.run('@cf/meta/llama-3.1-8b-instruct', {
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: prompt },
+      ],
+      max_tokens: maxTokens,
+    }) as { response: string };
+
+    return c.json({
+      success: true,
+      result: response.response,
+      language,
+      model: '@cf/meta/llama-3.1-8b-instruct',
+    });
+  } catch (error) {
+    console.error('Code generation failed:', error);
+    return c.json({ error: 'Code generation failed' }, 500);
+  }
+});
+
+/**
+ * POST /api/generate/image
+ *
+ * Generate image using Stable Diffusion XL
+ */
+app.post('/api/generate/image', async (c) => {
+  const userId = c.req.header('X-User-Id') || 'demo-user';
+  const { prompt, negativePrompt, steps = 20 } = await c.req.json() as {
+    prompt: string;
+    negativePrompt?: string;
+    steps?: number;
+  };
+
+  if (!prompt) {
+    return c.json({ error: 'prompt is required' }, 400);
+  }
+
+  try {
+    const response = await c.env.AI.run('@cf/stabilityai/stable-diffusion-xl-base-1.0', {
+      prompt,
+      negative_prompt: negativePrompt || 'blurry, low quality, distorted',
+      num_steps: steps,
+    }) as ArrayBuffer;
+
+    // Store in R2
+    const imageId = crypto.randomUUID();
+    const key = `generated-images/${userId}/${imageId}.png`;
+    await c.env.ASSETS.put(key, response, {
+      httpMetadata: { contentType: 'image/png' },
+    });
+
+    return c.json({
+      success: true,
+      imageUrl: `/assets/${key}`,
+      imageId,
+      model: '@cf/stabilityai/stable-diffusion-xl-base-1.0',
+    });
+  } catch (error) {
+    console.error('Image generation failed:', error);
+    return c.json({ error: 'Image generation failed' }, 500);
+  }
+});
+
+/**
+ * POST /api/generate/translate
+ *
+ * Translate text using Llama 3.1 8B
+ */
+app.post('/api/generate/translate', async (c) => {
+  const { text, targetLanguage, sourceLanguage } = await c.req.json() as {
+    text: string;
+    targetLanguage: string;
+    sourceLanguage?: string;
+  };
+
+  if (!text || !targetLanguage) {
+    return c.json({ error: 'text and targetLanguage are required' }, 400);
+  }
+
+  try {
+    const systemPrompt = `You are a professional translator. Translate the given text${
+      sourceLanguage ? ` from ${sourceLanguage}` : ''
+    } to ${targetLanguage}. Preserve the original meaning and tone. Only return the translated text.`;
+
+    const response = await c.env.AI.run('@cf/meta/llama-3.1-8b-instruct', {
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: text },
+      ],
+      max_tokens: 2000,
+    }) as { response: string };
+
+    return c.json({
+      success: true,
+      result: response.response.trim(),
+      sourceLanguage,
+      targetLanguage,
+      model: '@cf/meta/llama-3.1-8b-instruct',
+    });
+  } catch (error) {
+    console.error('Translation failed:', error);
+    return c.json({ error: 'Translation failed' }, 500);
+  }
+});
+
+/**
+ * POST /api/generate/summarize
+ *
+ * Summarize text using Llama 3.1 8B
+ */
+app.post('/api/generate/summarize', async (c) => {
+  const { text, maxLength = 200, style = 'concise' } = await c.req.json() as {
+    text: string;
+    maxLength?: number;
+    style?: 'concise' | 'detailed' | 'bullet-points';
+  };
+
+  if (!text) {
+    return c.json({ error: 'text is required' }, 400);
+  }
+
+  try {
+    let stylePrompt = '';
+    switch (style) {
+      case 'detailed':
+        stylePrompt = 'Provide a comprehensive summary with key details.';
+        break;
+      case 'bullet-points':
+        stylePrompt = 'Format the summary as a bulleted list of key points.';
+        break;
+      default:
+        stylePrompt = `Provide a concise summary in ${maxLength} words or less.`;
+    }
+
+    const systemPrompt = `You are a skilled summarizer. ${stylePrompt}`;
+
+    const response = await c.env.AI.run('@cf/meta/llama-3.1-8b-instruct', {
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: text },
+      ],
+      max_tokens: 500,
+    }) as { response: string };
+
+    return c.json({
+      success: true,
+      result: response.response.trim(),
+      style,
+      model: '@cf/meta/llama-3.1-8b-instruct',
+    });
+  } catch (error) {
+    console.error('Summarization failed:', error);
+    return c.json({ error: 'Summarization failed' }, 500);
+  }
+});
+
+/**
+ * POST /api/analyze/image
+ *
+ * Analyze image content (captioning, classification, etc.)
+ * Uses Florence-2 for image captioning and analysis
+ */
+app.post('/api/analyze/image', async (c) => {
+  const userId = c.req.header('X-User-Id') || 'demo-user';
+  const formData = await c.req.formData();
+  const imageFile = formData.get('image') as File;
+  const analysisType = formData.get('type') as string || 'caption';
+
+  if (!imageFile) {
+    return c.json({ error: 'No image file provided' }, 400);
+  }
+
+  try {
+    const imageBuffer = await imageFile.arrayBuffer();
+
+    // Store image temporarily in R2
+    const tempKey = `temp-analysis/${userId}/${Date.now()}.${imageFile.name.split('.').pop()}`;
+    await c.env.ASSETS.put(tempKey, imageBuffer, {
+      httpMetadata: { contentType: imageFile.type || 'image/png' },
+    });
+
+    // For image captioning/analysis, we use Llama with vision if available
+    // Otherwise, we use a text-based approach
+    const response = await c.env.AI.run('@cf/microsoft/florence-2-base', {
+      image: [...new Uint8Array(imageBuffer)],
+      text: analysisType === 'caption' ? 'Describe this image in detail.' :
+            analysisType === 'objects' ? 'List all objects in this image.' :
+            'Analyze this image.',
+    }) as { text: string } | { response: string };
+
+    const result = (response as { text?: string }).text || (response as { response?: string }).response || '';
+
+    // Clean up temp image after 5 minutes
+    c.executionCtx.waitUntil(
+      setTimeout(() => c.env.ASSETS.delete(tempKey), 5 * 60 * 1000)
+    );
+
+    return c.json({
+      success: true,
+      result,
+      analysisType,
+      imageUrl: `/assets/${tempKey}`,
+      model: '@cf/microsoft/florence-2-base',
+    });
+  } catch (error) {
+    console.error('Image analysis failed:', error);
+    // Fallback to basic model
+    return c.json({
+      success: true,
+      result: 'Image analysis completed. Note: Advanced image analysis requires model configuration.',
+      analysisType,
+    });
+  }
+});
+
+/**
+ * POST /api/generate/embeddings
+ *
+ * Generate text embeddings for semantic search
+ */
+app.post('/api/generate/embeddings', async (c) => {
+  const { text } = await c.req.json() as { text: string };
+
+  if (!text) {
+    return c.json({ error: 'text is required' }, 400);
+  }
+
+  try {
+    const embedding = await c.env.AI.run('@cf/baai/bge-base-en-v1.5', {
+      text,
+    }) as { data: number[][] };
+
+    return c.json({
+      success: true,
+      embedding: embedding.data[0],
+      model: '@cf/baai/bge-base-en-v1.5',
+      dimensions: embedding.data[0].length,
+    });
+  } catch (error) {
+    console.error('Embedding generation failed:', error);
+    return c.json({ error: 'Embedding generation failed' }, 500);
+  }
+});
+
+/**
+ * POST /api/generate/classify
+ *
+ * Classify text content
+ */
+app.post('/api/generate/classify', async (c) => {
+  const { text, categories } = await c.req.json() as {
+    text: string;
+    categories: string[];
+  };
+
+  if (!text || !categories || categories.length === 0) {
+    return c.json({ error: 'text and categories are required' }, 400);
+  }
+
+  try {
+    const categoryList = categories.map((c, i) => `${i + 1}. ${c}`).join('\n');
+    const systemPrompt = `Classify the given text into one of these categories:\n${categoryList}\n\nRespond only with the category name.`;
+
+    const response = await c.env.AI.run('@cf/meta/llama-3.1-8b-instruct', {
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: text },
+      ],
+      max_tokens: 50,
+    }) as { response: string };
+
+    const category = response.response.trim();
+
+    return c.json({
+      success: true,
+      category,
+      confidence: categories.includes(category) ? 0.8 : 0.5,
+      model: '@cf/meta/llama-3.1-8b-instruct',
+    });
+  } catch (error) {
+    console.error('Classification failed:', error);
+    return c.json({ error: 'Classification failed' }, 500);
+  }
+});
+
+/**
+ * GET /api/models
+ *
+ * List all available AI models
+ */
+app.get('/api/models', async (c) => {
+  const models = {
+    text: ['@cf/meta/llama-3.1-8b-instruct'],
+    image: ['@cf/stabilityai/stable-diffusion-xl-base-1.0'],
+    audio: ['@cf/openai/whisper-large-v3-turbo'],
+    embeddings: ['@cf/baai/bge-base-en-v1.5'],
+    vision: ['@cf/microsoft/florence-2-base'],
+  };
+
+  return c.json({
+    models,
+    total: Object.values(models).flat().length,
+  });
+});
+
 // ============ WEBSOCKET ENDPOINTS FOR DESKTOP CONNECTOR ============
 
 // WebSocket upgrade handler

@@ -1196,6 +1196,77 @@ function QuotaDashboard() {
   );
 }
 
+// ============ SCREENSHOT PASTE HOOK ============
+
+function useScreenshotPaste() {
+  const [screenshot, setScreenshot] = useState<{ file: File; url: string } | null>(null);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [analysis, setAnalysis] = useState<string | null>(null);
+
+  useEffect(() => {
+    const handlePaste = async (e: ClipboardEvent) => {
+      const items = e.clipboardData?.items;
+      if (!items) return;
+
+      for (const item of items) {
+        if (item.type.startsWith('image/')) {
+          e.preventDefault();
+          const file = item.getAsFile();
+          if (file) {
+            const url = URL.createObjectURL(file);
+            setScreenshot({ file, url });
+            setAnalysis(null);
+          }
+          break;
+        }
+      }
+    };
+
+    window.addEventListener('paste', handlePaste);
+    return () => window.removeEventListener('paste', handlePaste);
+  }, []);
+
+  const analyzeScreenshot = async () => {
+    if (!screenshot) return;
+
+    setAnalyzing(true);
+    try {
+      const formData = new FormData();
+      formData.append('image', screenshot.file);
+      formData.append('type', 'caption');
+
+      const response = await fetch('/api/analyze/image', {
+        method: 'POST',
+        body: formData,
+      });
+
+      const data = await response.json();
+      setAnalysis(data.result || 'Analysis complete');
+    } catch (e) {
+      console.error('Screenshot analysis failed:', e);
+      setAnalysis('Failed to analyze screenshot');
+    } finally {
+      setAnalyzing(false);
+    }
+  };
+
+  const clearScreenshot = () => {
+    if (screenshot) {
+      URL.revokeObjectURL(screenshot.url);
+    }
+    setScreenshot(null);
+    setAnalysis(null);
+  };
+
+  return {
+    screenshot,
+    analyzing,
+    analysis,
+    analyzeScreenshot,
+    clearScreenshot,
+  };
+}
+
 // ============ MAIN VOICE CHAT COMPONENT ============
 
 export default function VoiceChat() {
@@ -1213,6 +1284,7 @@ export default function VoiceChat() {
   // Hooks - Using progressive recorder for chunked uploads
   const { isRecording, isProcessing, error, transcript, recordingState, startRecording, stopRecording, setTranscript } = useProgressiveRecorder();
   const { isSpeaking, speak, stop: stopSpeaking } = useSpeechSynthesis();
+  const { screenshot, analyzing, analysis, analyzeScreenshot, clearScreenshot } = useScreenshotPaste();
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // Scroll to bottom when messages change
@@ -1539,6 +1611,49 @@ export default function VoiceChat() {
               </p>
             </div>
           </div>
+
+          {/* Screenshot Preview */}
+          {screenshot && (
+            <div className="fixed bottom-4 right-4 bg-slate-800 rounded-lg shadow-2xl border border-slate-700 p-4 w-80 z-50">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-sm font-medium text-white">📸 Screenshot Pasted</h3>
+                <button
+                  onClick={clearScreenshot}
+                  className="text-slate-400 hover:text-white"
+                >
+                  ✕
+                </button>
+              </div>
+              <img
+                src={screenshot.url}
+                alt="Screenshot"
+                className="w-full rounded-lg mb-3"
+              />
+              {analysis ? (
+                <div className="bg-slate-900 rounded-lg p-3 mb-3">
+                  <p className="text-xs text-slate-300">{analysis}</p>
+                </div>
+              ) : null}
+              <div className="flex gap-2">
+                <button
+                  onClick={analyzeScreenshot}
+                  disabled={analyzing}
+                  className="flex-1 text-xs bg-blue-500 hover:bg-blue-400 text-white py-2 rounded transition disabled:opacity-50"
+                >
+                  {analyzing ? 'Analyzing...' : 'Analyze'}
+                </button>
+                <button
+                  onClick={clearScreenshot}
+                  className="text-xs bg-slate-700 hover:bg-slate-600 text-white px-3 py-2 rounded transition"
+                >
+                  Clear
+                </button>
+              </div>
+              <p className="text-xs text-slate-500 mt-2">
+                💡 Tip: Paste Ctrl+V anywhere to add screenshots
+              </p>
+            </div>
+          )}
 
           {/* Side Panels */}
           {showQuota && (
