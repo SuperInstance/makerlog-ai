@@ -20,6 +20,12 @@ interface Message {
   timestamp: number;
 }
 
+interface RecordingState {
+  isRecording: boolean;
+  startedAt: number | null;
+  duration: number; // in seconds
+}
+
 interface Conversation {
   id: string;
   title: string;
@@ -43,8 +49,45 @@ function useVoiceRecorder() {
   const [isRecording, setIsRecording] = useState(false);
   const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [recordingState, setRecordingState] = useState<RecordingState>({
+    isRecording: false,
+    startedAt: null,
+    duration: 0,
+  });
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
+  const wakeLockRef = useRef<WakeLockSentinel | null>(null);
+  const durationIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+
+  // Play beep tone for audio feedback
+  const playBeep = useCallback((frequency: number, duration: number) => {
+    if (!audioContextRef.current) {
+      audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+    }
+    const ctx = audioContextRef.current;
+    const oscillator = ctx.createOscillator();
+    const gainNode = ctx.createGain();
+
+    oscillator.connect(gainNode);
+    gainNode.connect(ctx.destination);
+
+    oscillator.frequency.value = frequency;
+    oscillator.type = 'sine';
+
+    gainNode.gain.setValueAtTime(0.1, ctx.currentTime);
+    gainNode.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + duration / 1000);
+
+    oscillator.start(ctx.currentTime);
+    oscillator.stop(ctx.currentTime + duration / 1000);
+  }, []);
+
+  // Trigger haptic feedback
+  const triggerHaptic = useCallback((pattern: number | number[]) => {
+    if ('vibrate' in navigator) {
+      navigator.vibrate(pattern);
+    }
+  }, []);
 
   const startRecording = useCallback(async () => {
     try {
@@ -66,25 +109,326 @@ function useVoiceRecorder() {
         const blob = new Blob(chunksRef.current, { type: 'audio/webm' });
         setAudioBlob(blob);
         stream.getTracks().forEach((track) => track.stop());
+
+        // Play stop beep (lower frequency)
+        playBeep(600, 100);
+        // Haptic feedback for stop
+        triggerHaptic([20, 50, 20]);
       };
 
       mediaRecorder.start(100); // Collect data every 100ms
+
+      const startedAt = Date.now();
       setIsRecording(true);
+      setRecordingState({
+        isRecording: true,
+        startedAt,
+        duration: 0,
+      });
       setError(null);
+
+      // Play start beep (higher frequency)
+      playBeep(800, 100);
+      // Haptic feedback for start
+      triggerHaptic(10);
+
+      // Request wake lock to prevent screen sleep
+      if ('wakeLock' in navigator) {
+        try {
+          wakeLockRef.current = await (navigator as any).wakeLock.request('screen');
+        } catch (err) {
+          console.warn('Wake lock request failed:', err);
+        }
+      }
+
+      // Start duration tracking
+      durationIntervalRef.current = setInterval(() => {
+        setRecordingState((prev) => ({
+          ...prev,
+          duration: Math.floor((Date.now() - startedAt) / 1000),
+        }));
+      }, 100);
+
     } catch (err) {
       setError('Microphone access denied');
       console.error('Failed to start recording:', err);
     }
-  }, []);
+  }, [playBeep, triggerHaptic]);
 
   const stopRecording = useCallback(() => {
     if (mediaRecorderRef.current && isRecording) {
       mediaRecorderRef.current.stop();
       setIsRecording(false);
+      setRecordingState({
+        isRecording: false,
+        startedAt: null,
+        duration: 0,
+      });
+
+      // Clear duration interval
+      if (durationIntervalRef.current) {
+        clearInterval(durationIntervalRef.current);
+        durationIntervalRef.current = null;
+      }
+
+      // Release wake lock
+      if (wakeLockRef.current) {
+        wakeLockRef.current.release();
+        wakeLockRef.current = null;
+      }
     }
   }, [isRecording]);
 
-  return { isRecording, audioBlob, error, startRecording, stopRecording, setAudioBlob };
+  return {
+    isRecording,
+    audioBlob,
+    error,
+    startRecording,
+    stopRecording,
+    setAudioBlob,
+    recordingState,
+  };
+}
+
+/**
+ * Progressive recording hook that uploads chunks during recording.
+ * This prevents data loss if the app crashes or loses connection.
+ */
+function useProgressiveRecorder() {
+  const [isRecording, setIsRecording] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [recordingState, setRecordingState] = useState<RecordingState>({
+    isRecording: false,
+    startedAt: null,
+    duration: 0,
+  });
+  const [transcript, setTranscript] = useState<string | null>(null);
+
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
+  const wakeLockRef = useRef<WakeLockSentinel | null>(null);
+  const durationIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const uploadIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const recordingIdRef = useRef<string | null>(null);
+  const chunkIndexRef = useRef(0);
+
+  const API_BASE = '/api';
+
+  // Play beep tone for audio feedback
+  const playBeep = useCallback((frequency: number, duration: number) => {
+    if (!audioContextRef.current) {
+      audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+    }
+    const ctx = audioContextRef.current;
+    const oscillator = ctx.createOscillator();
+    const gainNode = ctx.createGain();
+
+    oscillator.connect(gainNode);
+    gainNode.connect(ctx.destination);
+
+    oscillator.frequency.value = frequency;
+    oscillator.type = 'sine';
+
+    gainNode.gain.setValueAtTime(0.1, ctx.currentTime);
+    gainNode.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + duration / 1000);
+
+    oscillator.start(ctx.currentTime);
+    oscillator.stop(ctx.currentTime + duration / 1000);
+  }, []);
+
+  // Trigger haptic feedback
+  const triggerHaptic = useCallback((pattern: number | number[]) => {
+    if ('vibrate' in navigator) {
+      navigator.vibrate(pattern);
+    }
+  }, []);
+
+  // Upload a chunk to R2
+  const uploadChunk = useCallback(async (blob: Blob, isFinal: boolean = false) => {
+    const recordingId = recordingIdRef.current;
+    if (!recordingId) return;
+
+    const chunkIndex = chunkIndexRef.current++;
+    const formData = new FormData();
+    formData.append('audio', blob, `chunk-${chunkIndex}.webm`);
+    formData.append('recording_id', recordingId);
+    formData.append('chunk_index', chunkIndex.toString());
+    formData.append('is_final', isFinal.toString());
+
+    try {
+      const response = await fetch(`${API_BASE}/voice/upload-chunk`, {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!response.ok) {
+        console.error('Chunk upload failed:', await response.text());
+      }
+    } catch (err) {
+      console.error('Chunk upload error:', err);
+    }
+  }, []);
+
+  // Finalize recording (transcribe and get AI response)
+  const finalizeRecording = useCallback(async (recordingId: string, conversationId: string | null) => {
+    setIsProcessing(true);
+    try {
+      const response = await fetch(`${API_BASE}/voice/finalize-recording`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          recording_id: recordingId,
+          conversation_id: conversationId,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to finalize recording');
+      }
+
+      const data = await response.json();
+      setTranscript(data.transcript);
+      return data;
+    } catch (err) {
+      setError('Failed to process recording');
+      console.error('Finalize error:', err);
+      return null;
+    } finally {
+      setIsProcessing(false);
+    }
+  }, [API_BASE]);
+
+  const startRecording = useCallback(async (conversationId?: string) => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mediaRecorder = new MediaRecorder(stream, {
+        mimeType: 'audio/webm;codecs=opus',
+      });
+
+      // Generate unique recording ID
+      recordingIdRef.current = crypto.randomUUID();
+      chunkIndexRef.current = 0;
+      chunksRef.current = [];
+
+      mediaRecorderRef.current = mediaRecorder;
+
+      mediaRecorder.ondataavailable = (e) => {
+        if (e.data.size > 0) {
+          chunksRef.current.push(e.data);
+        }
+      };
+
+      mediaRecorder.onstop = async () => {
+        // Upload remaining chunks as final
+        if (chunksRef.current.length > 0) {
+          const finalBlob = new Blob(chunksRef.current, { type: 'audio/webm' });
+          await uploadChunk(finalBlob, true);
+        }
+        stream.getTracks().forEach((track) => track.stop());
+      };
+
+      mediaRecorder.start(1000); // Collect data every 1 second
+
+      const startedAt = Date.now();
+      setIsRecording(true);
+      setRecordingState({
+        isRecording: true,
+        startedAt,
+        duration: 0,
+      });
+      setError(null);
+      setTranscript(null);
+
+      // Play start beep (higher frequency)
+      playBeep(800, 100);
+      // Haptic feedback for start
+      triggerHaptic(10);
+
+      // Request wake lock to prevent screen sleep
+      if ('wakeLock' in navigator) {
+        try {
+          wakeLockRef.current = await (navigator as any).wakeLock.request('screen');
+        } catch (err) {
+          console.warn('Wake lock request failed:', err);
+        }
+      }
+
+      // Start duration tracking
+      durationIntervalRef.current = setInterval(() => {
+        setRecordingState((prev) => ({
+          ...prev,
+          duration: Math.floor((Date.now() - startedAt) / 1000),
+        }));
+      }, 100);
+
+      // Start chunk upload interval (every 10 seconds)
+      uploadIntervalRef.current = setInterval(() => {
+        if (chunksRef.current.length > 0) {
+          // Combine recent chunks and upload
+          const recentChunks = chunksRef.current.splice(-10); // Take last 10 chunks
+          const chunkBlob = new Blob(recentChunks, { type: 'audio/webm' });
+          uploadChunk(chunkBlob, false);
+        }
+      }, 10000);
+
+    } catch (err) {
+      setError('Microphone access denied');
+      console.error('Failed to start recording:', err);
+    }
+  }, [playBeep, triggerHaptic, uploadChunk]);
+
+  const stopRecording = useCallback(async (conversationId?: string) => {
+    if (mediaRecorderRef.current && isRecording) {
+      mediaRecorderRef.current.stop();
+      setIsRecording(false);
+      setRecordingState({
+        isRecording: false,
+        startedAt: null,
+        duration: 0,
+      });
+
+      // Clear intervals
+      if (durationIntervalRef.current) {
+        clearInterval(durationIntervalRef.current);
+        durationIntervalRef.current = null;
+      }
+      if (uploadIntervalRef.current) {
+        clearInterval(uploadIntervalRef.current);
+        uploadIntervalRef.current = null;
+      }
+
+      // Release wake lock
+      if (wakeLockRef.current) {
+        wakeLockRef.current.release();
+        wakeLockRef.current = null;
+      }
+
+      // Play stop beep (lower frequency)
+      playBeep(600, 100);
+      // Haptic feedback for stop
+      triggerHaptic([20, 50, 20]);
+
+      // Finalize recording
+      if (recordingIdRef.current) {
+        const result = await finalizeRecording(recordingIdRef.current, conversationId || null);
+        return result;
+      }
+    }
+    return null;
+  }, [isRecording, playBeep, triggerHaptic, finalizeRecording]);
+
+  return {
+    isRecording,
+    isProcessing,
+    error,
+    transcript,
+    recordingState,
+    startRecording,
+    stopRecording,
+    setTranscript,
+  };
 }
 
 function useSpeechSynthesis() {
@@ -129,11 +473,13 @@ function useSpeechSynthesis() {
 function RecordButton({
   isRecording,
   isProcessing,
+  duration,
   onStart,
   onStop,
 }: {
   isRecording: boolean;
   isProcessing: boolean;
+  duration: number;
   onStart: () => void;
   onStop: () => void;
 }) {
@@ -145,36 +491,50 @@ function RecordButton({
     if (isRecording) onStop();
   };
 
+  // Format duration as MM:SS
+  const formatDuration = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
+
   return (
-    <button
-      onMouseDown={handleMouseDown}
-      onMouseUp={handleMouseUp}
-      onTouchStart={handleMouseDown}
-      onTouchEnd={handleMouseUp}
-      disabled={isProcessing}
-      className={`
-        w-24 h-24 rounded-full flex items-center justify-center
-        transition-all duration-200 select-none
-        ${isRecording
-          ? 'bg-red-500 scale-110 shadow-lg shadow-red-500/50 animate-pulse'
-          : isProcessing
-            ? 'bg-slate-600 cursor-not-allowed'
-            : 'bg-blue-500 hover:bg-blue-400 hover:scale-105 active:scale-95'
-        }
-      `}
-    >
-      {isProcessing ? (
-        <svg className="w-8 h-8 animate-spin text-white" viewBox="0 0 24 24">
-          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-        </svg>
-      ) : (
-        <svg className="w-10 h-10 text-white" fill="currentColor" viewBox="0 0 24 24">
-          <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z" />
-          <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z" />
-        </svg>
+    <div className="flex flex-col items-center">
+      <button
+        onMouseDown={handleMouseDown}
+        onMouseUp={handleMouseUp}
+        onTouchStart={handleMouseDown}
+        onTouchEnd={handleMouseUp}
+        disabled={isProcessing}
+        className={`
+          w-24 h-24 rounded-full flex items-center justify-center
+          transition-all duration-200 select-none
+          ${isRecording
+            ? 'bg-red-500 scale-110 shadow-lg shadow-red-500/50 animate-pulse'
+            : isProcessing
+              ? 'bg-slate-600 cursor-not-allowed'
+              : 'bg-blue-500 hover:bg-blue-400 hover:scale-105 active:scale-95'
+          }
+        `}
+      >
+        {isProcessing ? (
+          <svg className="w-8 h-8 animate-spin text-white" viewBox="0 0 24 24">
+            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+          </svg>
+        ) : (
+          <svg className="w-10 h-10 text-white" fill="currentColor" viewBox="0 0 24 24">
+            <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z" />
+            <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z" />
+          </svg>
+        )}
+      </button>
+      {isRecording && duration > 0 && (
+        <div className="mt-3 px-3 py-1 bg-slate-800 rounded-full">
+          <span className="text-sm font-mono text-red-400">{formatDuration(duration)}</span>
+        </div>
       )}
-    </button>
+    </div>
   );
 }
 
@@ -392,6 +752,165 @@ function DailyDigestPanel({
   );
 }
 
+function DailyLogPanel({
+  selectedDate,
+  onDateChange,
+  onEditMessage,
+}: {
+  selectedDate: string;
+  onDateChange: (date: string) => void;
+  onEditMessage: (messageId: string, content: string) => void;
+}) {
+  const [log, setLog] = useState<{ markdown: string; messages: Message[] } | null>(null);
+  const [dates, setDates] = useState<{ date: string; messageCount: number }[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [editingMessage, setEditingMessage] = useState<string | null>(null);
+  const [editContent, setEditContent] = useState('');
+
+  const fetchLog = async (date: string) => {
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/daily-log?date=${date}&format=markdown`);
+      const data = await res.json();
+      setLog(data);
+    } catch (e) {
+      console.error('Failed to fetch daily log:', e);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchDates = async () => {
+    try {
+      const res = await fetch('/api/daily-log/dates');
+      const data = await res.json();
+      setDates(data.dates || []);
+    } catch (e) {
+      console.error('Failed to fetch dates:', e);
+    }
+  };
+
+  useEffect(() => {
+    fetchLog(selectedDate);
+    fetchDates();
+  }, [selectedDate]);
+
+  const handleEdit = (messageId: string, content: string) => {
+    setEditingMessage(messageId);
+    setEditContent(content);
+  };
+
+  const handleSave = async () => {
+    if (editingMessage) {
+      await onEditMessage(editingMessage, editContent);
+      setEditingMessage(null);
+      setEditContent('');
+      // Refresh log
+      fetchLog(selectedDate);
+    }
+  };
+
+  const handleCancel = () => {
+    setEditingMessage(null);
+    setEditContent('');
+  };
+
+  return (
+    <div className="h-full flex flex-col bg-slate-900">
+      {/* Header with date selector */}
+      <div className="p-4 border-b border-slate-700">
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-lg font-bold text-white">Daily Log</h2>
+          <button
+            onClick={() => window.open('/api/daily-log?date=' + selectedDate + '&format=markdown', '_blank')}
+            className="text-xs bg-slate-700 hover:bg-slate-600 text-white px-3 py-1 rounded transition"
+          >
+            Export MD
+          </button>
+        </div>
+        <select
+          value={selectedDate}
+          onChange={(e) => onDateChange(e.target.value)}
+          className="w-full bg-slate-800 text-white border border-slate-600 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-500"
+        >
+          {dates.map((d) => (
+            <option key={d.date} value={d.date}>
+              {d.date} ({d.messageCount} messages)
+            </option>
+          ))}
+        </select>
+      </div>
+
+      {/* Content */}
+      <div className="flex-1 overflow-y-auto p-6">
+        {loading ? (
+          <div className="text-center text-slate-500">Loading...</div>
+        ) : log ? (
+          <div className="prose prose-invert prose-sm max-w-none">
+            {/* Editable messages */}
+            {log.messages.map((msg) => (
+              <div key={msg.id} className="mb-4 group">
+                {editingMessage === msg.id ? (
+                  <div className="bg-slate-800 p-3 rounded-lg">
+                    <textarea
+                      value={editContent}
+                      onChange={(e) => setEditContent(e.target.value)}
+                      className="w-full bg-slate-700 text-white text-sm rounded p-2 min-h-[100px] focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                    <div className="flex gap-2 mt-2">
+                      <button
+                        onClick={handleSave}
+                        className="text-xs bg-blue-500 hover:bg-blue-400 text-white px-3 py-1 rounded"
+                      >
+                        Save
+                      </button>
+                      <button
+                        onClick={handleCancel}
+                        className="text-xs bg-slate-700 hover:bg-slate-600 text-white px-3 py-1 rounded"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="bg-slate-800 p-3 rounded-lg">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className={`text-xs font-medium ${
+                        msg.role === 'user' ? 'text-blue-400' : 'text-green-400'
+                      }`}>
+                        {msg.role === 'user' ? 'You' : 'Makerlog'}
+                      </span>
+                      <button
+                        onClick={() => handleEdit(msg.id, msg.content)}
+                        className="text-xs text-slate-500 hover:text-slate-300 opacity-0 group-hover:opacity-100 transition"
+                      >
+                        Edit
+                      </button>
+                    </div>
+                    <p className="text-sm text-slate-300">{msg.content}</p>
+                    {msg.audioUrl && (
+                      <a
+                        href={msg.audioUrl}
+                        className="text-xs text-slate-500 hover:text-slate-300 mt-2 inline-block"
+                      >
+                        🔊 Audio
+                      </a>
+                    )}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="text-center text-slate-500">
+            No recordings for this date
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ============ MAIN VOICE CHAT COMPONENT ============
 
 export default function VoiceChat() {
@@ -400,11 +919,12 @@ export default function VoiceChat() {
   const [currentConversationId, setCurrentConversationId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
-  const [isProcessing, setIsProcessing] = useState(false);
   const [showOpportunities, setShowOpportunities] = useState(false);
+  const [showDailyLog, setShowDailyLog] = useState(false);
+  const [selectedLogDate, setSelectedLogDate] = useState(new Date().toISOString().split('T')[0]);
 
-  // Hooks
-  const { isRecording, audioBlob, startRecording, stopRecording, setAudioBlob } = useVoiceRecorder();
+  // Hooks - Using progressive recorder for chunked uploads
+  const { isRecording, isProcessing, error, transcript, recordingState, startRecording, stopRecording, setTranscript } = useProgressiveRecorder();
   const { isSpeaking, speak, stop: stopSpeaking } = useSpeechSynthesis();
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -426,13 +946,24 @@ export default function VoiceChat() {
     }
   }, [currentConversationId]);
 
-  // Process audio when recording stops
+  // Process transcript when ready
   useEffect(() => {
-    if (audioBlob && !isRecording) {
-      processAudio(audioBlob);
-      setAudioBlob(null);
+    if (transcript) {
+      // Add user message
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: crypto.randomUUID(),
+          role: 'user',
+          content: transcript,
+          timestamp: Math.floor(Date.now() / 1000),
+        },
+      ]);
+
+      // Set transcript to null to avoid re-processing
+      setTranscript(null);
     }
-  }, [audioBlob, isRecording]);
+  }, [transcript]);
 
   // API calls
   const fetchConversations = async () => {
@@ -465,59 +996,50 @@ export default function VoiceChat() {
     }
   };
 
-  const processAudio = async (blob: Blob) => {
-    setIsProcessing(true);
-    try {
-      const formData = new FormData();
-      formData.append('audio', blob, 'recording.webm');
-      if (currentConversationId) {
-        formData.append('conversation_id', currentConversationId);
+  const handleRecordingStart = useCallback(() => {
+    startRecording(currentConversationId || undefined);
+  }, [startRecording, currentConversationId]);
+
+  const handleRecordingStop = useCallback(async () => {
+    const result = await stopRecording(currentConversationId || undefined);
+
+    if (result) {
+      // Update conversation ID if new
+      if (!currentConversationId && result.conversationId) {
+        setCurrentConversationId(result.conversationId);
+        fetchConversations();
       }
 
-      const res = await fetch(`${API_BASE}/voice/transcribe`, {
-        method: 'POST',
-        body: formData,
-      });
+      // Add user message
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: result.messageId,
+          role: 'user',
+          content: result.transcript,
+          audioUrl: result.audioUrl,
+          timestamp: Math.floor(Date.now() / 1000),
+        },
+      ]);
 
-      const data = await res.json();
+      // Add assistant message
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: crypto.randomUUID(),
+          role: 'assistant',
+          content: result.response,
+          timestamp: Math.floor(Date.now() / 1000),
+        },
+      ]);
 
-      if (data.transcript) {
-        // Update conversation ID if new
-        if (!currentConversationId && data.conversationId) {
-          setCurrentConversationId(data.conversationId);
-          fetchConversations();
-        }
+      // Speak the response
+      speak(result.response);
 
-        // Add messages
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: data.messageId,
-            role: 'user',
-            content: data.transcript,
-            audioUrl: data.audioUrl,
-            timestamp: Math.floor(Date.now() / 1000),
-          },
-          {
-            id: crypto.randomUUID(),
-            role: 'assistant',
-            content: data.response,
-            timestamp: Math.floor(Date.now() / 1000),
-          },
-        ]);
-
-        // Speak the response
-        speak(data.response);
-
-        // Refresh opportunities
-        fetchOpportunities();
-      }
-    } catch (e) {
-      console.error('Failed to process audio:', e);
-    } finally {
-      setIsProcessing(false);
+      // Refresh opportunities
+      fetchOpportunities();
     }
-  };
+  }, [stopRecording, currentConversationId, speak]);
 
   const createNewConversation = async () => {
     try {
@@ -568,6 +1090,28 @@ export default function VoiceChat() {
     }
   };
 
+  const editMessage = async (messageId: string, content: string) => {
+    try {
+      const res = await fetch(`${API_BASE}/messages/${messageId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content }),
+      });
+
+      if (!res.ok) {
+        throw new Error('Failed to edit message');
+      }
+
+      // Update local messages if editing current conversation
+      setMessages((prev) =>
+        prev.map((m) => (m.id === messageId ? { ...m, content } : m))
+      );
+    } catch (e) {
+      console.error('Failed to edit message:', e);
+      throw e;
+    }
+  };
+
   return (
     <div className="flex h-screen bg-slate-900">
       {/* Sidebar */}
@@ -594,16 +1138,34 @@ export default function VoiceChat() {
               </button>
             )}
           </div>
-          <button
-            onClick={() => setShowOpportunities(!showOpportunities)}
-            className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
-              showOpportunities
-                ? 'bg-green-500 text-white'
-                : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
-            }`}
-          >
-            ✨ Opportunities {opportunities.length > 0 && `(${opportunities.length})`}
-          </button>
+          <div className="flex gap-2">
+            <button
+              onClick={() => {
+                setShowDailyLog(!showDailyLog);
+                setShowOpportunities(false);
+              }}
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
+                showDailyLog
+                  ? 'bg-blue-500 text-white'
+                  : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+              }`}
+            >
+              📅 Daily Log
+            </button>
+            <button
+              onClick={() => {
+                setShowOpportunities(!showOpportunities);
+                setShowDailyLog(false);
+              }}
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
+                showOpportunities
+                  ? 'bg-green-500 text-white'
+                  : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+              }`}
+            >
+              ✨ Opportunities {opportunities.length > 0 && `(${opportunities.length})`}
+            </button>
+          </div>
         </header>
 
         <div className="flex-1 flex overflow-hidden">
@@ -636,21 +1198,34 @@ export default function VoiceChat() {
               <RecordButton
                 isRecording={isRecording}
                 isProcessing={isProcessing}
-                onStart={startRecording}
-                onStop={stopRecording}
+                duration={recordingState.duration}
+                onStart={handleRecordingStart}
+                onStop={handleRecordingStop}
               />
               <p className="text-slate-500 text-sm mt-4">
-                {isRecording
-                  ? 'Release to send'
-                  : isProcessing
-                    ? 'Processing...'
-                    : 'Hold to speak'}
+                {error || (
+                  isRecording
+                    ? 'Release to send'
+                    : isProcessing
+                      ? 'Processing...'
+                      : 'Hold to speak'
+                )}
               </p>
             </div>
           </div>
 
-          {/* Opportunities Panel */}
-          {showOpportunities && (
+          {/* Side Panels */}
+          {showDailyLog && (
+            <div className="w-96 border-l border-slate-700 overflow-hidden">
+              <DailyLogPanel
+                selectedDate={selectedLogDate}
+                onDateChange={setSelectedLogDate}
+                onEditMessage={editMessage}
+              />
+            </div>
+          )}
+
+          {showOpportunities && !showDailyLog && (
             <div className="w-80 border-l border-slate-700 overflow-y-auto">
               <div className="p-4 border-b border-slate-700">
                 <h2 className="text-lg font-bold text-white">

@@ -486,6 +486,272 @@ async function unlockAchievement(env: Env, userId: string, achievementType: stri
 // ============ VOICE ENDPOINTS ============
 
 /**
+ * POST /api/voice/upload-chunk
+ *
+ * Progressive upload for audio chunks during recording.
+ * Chunks are stored immediately in R2 to prevent data loss.
+ * Returns a chunk ID for tracking.
+ */
+app.post('/api/voice/upload-chunk', async (c) => {
+  const userId = c.req.header('X-User-Id') || 'demo-user';
+
+  const formData = await c.req.formData();
+  const audioChunk = formData.get('audio') as File;
+  const recordingId = formData.get('recording_id') as string;
+  const chunkIndex = parseInt(formData.get('chunk_index') as string || '0');
+  const isFinal = formData.get('is_final') === 'true';
+
+  if (!audioChunk) {
+    return c.json({ error: 'No audio chunk provided' }, 400);
+  }
+
+  if (!recordingId) {
+    return c.json({ error: 'recording_id is required' }, 400);
+  }
+
+  try {
+    // Store chunk in R2 immediately
+    const chunkKey = `voice-chunks/${userId}/${recordingId}/chunk-${chunkIndex}.webm`;
+    await c.env.ASSETS.put(chunkKey, await audioChunk.arrayBuffer(), {
+      httpMetadata: { contentType: 'audio/webm' },
+    });
+
+    // Track chunk in KV for 30 minutes
+    const chunkData = {
+      userId,
+      recordingId,
+      chunkIndex,
+      chunkKey,
+      uploadedAt: Date.now(),
+      isFinal,
+    };
+
+    await c.env.KV.put(
+      `chunk:${recordingId}:${chunkIndex}`,
+      JSON.stringify(chunkData),
+      { expirationTtl: 1800 }
+    );
+
+    return c.json({
+      success: true,
+      chunkIndex,
+      chunkKey,
+    });
+
+  } catch (error) {
+    console.error('Chunk upload failed:', error);
+    return c.json({ error: 'Failed to upload chunk' }, 500);
+  }
+});
+
+/**
+ * POST /api/voice/finalize-recording
+ *
+ * Finalize a progressive upload recording:
+ * 1. Combines all chunks from R2
+ * 2. Transcribes with Whisper
+ * 3. Stores in conversation + vector DB
+ * 4. Generates response
+ * 5. Detects opportunities
+ */
+app.post('/api/voice/finalize-recording', async (c) => {
+  const userId = c.req.header('X-User-Id') || 'demo-user';
+  const body = await c.req.json() as {
+    recording_id: string;
+    conversation_id?: string;
+  };
+
+  if (!body.recording_id) {
+    return c.json({ error: 'recording_id is required' }, 400);
+  }
+
+  try {
+    // List all chunks for this recording
+    const chunkKeys: string[] = [];
+    let chunkIndex = 0;
+
+    while (true) {
+      const chunkData = await c.env.KV.get(
+        `chunk:${body.recording_id}:${chunkIndex}`,
+        { type: 'json' }
+      ) as { chunkKey: string } | null;
+
+      if (!chunkData) break;
+
+      chunkKeys.push(chunkData.chunkKey);
+      chunkIndex++;
+    }
+
+    if (chunkKeys.length === 0) {
+      return c.json({ error: 'No chunks found for recording' }, 404);
+    }
+
+    // Combine chunks into a single ArrayBuffer
+    const chunks: ArrayBuffer[] = [];
+    for (const key of chunkKeys) {
+      const chunk = await c.env.ASSETS.get(key);
+      if (chunk) {
+        chunks.push(await chunk.arrayBuffer());
+      }
+    }
+
+    // Combine all chunks (simple concatenation for WebM)
+    const totalLength = chunks.reduce((sum, buf) => sum + buf.byteLength, 0);
+    const combinedBuffer = new Uint8Array(totalLength);
+    let offset = 0;
+    for (const buf of chunks) {
+      combinedBuffer.set(new Uint8Array(buf), offset);
+      offset += buf.byteLength;
+    }
+
+    // Clean up chunks from R2 and KV
+    for (const key of chunkKeys) {
+      await c.env.ASSETS.delete(key);
+    }
+    for (let i = 0; i < chunkKeys.length; i++) {
+      await c.env.KV.delete(`chunk:${body.recording_id}:${i}`);
+    }
+
+    // Transcribe with Whisper
+    const transcription = await c.env.AI.run('@cf/openai/whisper', {
+      audio: [...combinedBuffer],
+    }) as { text: string };
+
+    const transcript = transcription.text.trim();
+
+    if (!transcript) {
+      return c.json({ error: 'Could not transcribe audio' }, 400);
+    }
+
+    // Create conversation if needed
+    let conversationId = body.conversation_id;
+    if (!conversationId) {
+      conversationId = crypto.randomUUID();
+      const now = Math.floor(Date.now() / 1000);
+      await c.env.DB.prepare(`
+        INSERT INTO conversations (id, user_id, title, created_at, updated_at, message_count)
+        VALUES (?, ?, ?, ?, ?, 0)
+      `).bind(
+        conversationId,
+        userId,
+        `Conversation ${new Date().toLocaleDateString()}`,
+        now,
+        now
+      ).run();
+    }
+
+    // Store combined audio in R2
+    const audioKey = `voice/${userId}/${conversationId}/${Date.now()}.webm`;
+    await c.env.ASSETS.put(audioKey, combinedBuffer.buffer, {
+      httpMetadata: { contentType: 'audio/webm' },
+    });
+
+    // Create message record
+    const messageId = crypto.randomUUID();
+    const timestamp = Math.floor(Date.now() / 1000);
+
+    await c.env.DB.prepare(`
+      INSERT INTO messages (id, conversation_id, role, content, audio_url, timestamp)
+      VALUES (?, ?, 'user', ?, ?, ?)
+    `).bind(messageId, conversationId, transcript, `/assets/${audioKey}`, timestamp).run();
+
+    // Generate embedding and store in Vectorize
+    try {
+      const embedding = await c.env.AI.run('@cf/baai/bge-base-en-v1.5', {
+        text: transcript,
+      }) as { data: number[][] };
+
+      if (c.env.VECTORIZE) {
+        await c.env.VECTORIZE.upsert([{
+          id: messageId,
+          values: embedding.data[0],
+          metadata: {
+            user_id: userId,
+            conversation_id: conversationId,
+            content: transcript.substring(0, 500),
+            timestamp,
+          },
+        }]);
+      }
+    } catch (e) {
+      console.error('Vectorize error:', e);
+    }
+
+    // Update conversation
+    await c.env.DB.prepare(`
+      UPDATE conversations SET updated_at = ?, message_count = message_count + 1
+      WHERE id = ?
+    `).bind(timestamp, conversationId).run();
+
+    // Get recent context for response
+    const recentMessages = await c.env.DB.prepare(`
+      SELECT role, content FROM messages
+      WHERE conversation_id = ?
+      ORDER BY timestamp DESC
+      LIMIT 5
+    `).bind(conversationId).all();
+
+    const context = (recentMessages.results || [])
+      .reverse()
+      .map((m: any) => `${m.role}: ${m.content}`)
+      .join('\n');
+
+    // Generate response
+    const systemPrompt = `You are Makerlog, a friendly AI assistant that helps makers think through their ideas.
+
+Your role is to:
+- Listen actively and ask clarifying questions
+- Help users articulate their ideas more clearly
+- Identify potential generative tasks (images, code, text) that could help
+- Keep responses concise and conversational (this is voice chat)
+
+Recent conversation:
+${context}
+
+Respond naturally to the user's latest message. If you notice something that could be generated (icon, code snippet, copy, etc.), mention it briefly.`;
+
+    const aiResponse = await c.env.AI.run('@cf/meta/llama-3.1-8b-instruct', {
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: transcript },
+      ],
+      max_tokens: 300,
+    }) as { response: string };
+
+    const response = aiResponse.response;
+
+    // Store assistant response
+    const assistantMessageId = crypto.randomUUID();
+    await c.env.DB.prepare(`
+      INSERT INTO messages (id, conversation_id, role, content, timestamp)
+      VALUES (?, ?, 'assistant', ?, ?)
+    `).bind(
+      assistantMessageId,
+      conversationId,
+      response,
+      Math.floor(Date.now() / 1000)
+    ).run();
+
+    // Analyze for opportunities (async)
+    c.executionCtx.waitUntil(
+      analyzeForOpportunities(c.env, conversationId, messageId, transcript)
+    );
+
+    return c.json({
+      transcript,
+      response,
+      conversationId,
+      messageId,
+      audioUrl: `/assets/${audioKey}`,
+    });
+
+  } catch (error) {
+    console.error('Finalize recording failed:', error);
+    return c.json({ error: 'Failed to finalize recording' }, 500);
+  }
+});
+
+/**
  * POST /api/voice/transcribe
  * 
  * The core voice-first interaction:
@@ -871,6 +1137,172 @@ app.get('/api/digest', async (c) => {
     opportunities: opportunities.results || [],
     opportunityCount: (opportunities.results || []).length,
   });
+});
+
+/**
+ * GET /api/daily-log
+ *
+ * Get daily log formatted as markdown
+ * Query params:
+ * - date: YYYY-MM-DD format (default: today)
+ * - format: 'json' | 'markdown' (default: 'markdown')
+ */
+app.get('/api/daily-log', async (c) => {
+  const userId = c.req.header('X-User-Id') || 'demo-user';
+  const dateParam = c.req.query('date');
+  const format = c.req.query('format') || 'markdown';
+
+  // Parse date or use today
+  let targetDate: Date;
+  if (dateParam) {
+    targetDate = new Date(dateParam + 'T00:00:00Z');
+  } else {
+    targetDate = new Date();
+    targetDate.setUTCHours(0, 0, 0, 0);
+  }
+
+  const dayStart = Math.floor(targetDate.getTime() / 1000);
+  const dayEnd = dayStart + 86400;
+
+  // Get all messages for the day
+  const messages = await c.env.DB.prepare(`
+    SELECT m.*, c.title as conversation_title
+    FROM messages m
+    JOIN conversations c ON m.conversation_id = c.id
+    WHERE c.user_id = ? AND m.timestamp >= ? AND m.timestamp < ?
+    ORDER BY m.timestamp ASC
+  `).bind(userId, dayStart, dayEnd).all();
+
+  if ((messages.results || []).length === 0) {
+    return c.json({
+      date: dateParam || new Date().toISOString().split('T')[0],
+      markdown: `# Daily Log - ${dateParam || new Date().toLocaleDateString()}\n\nNo recordings today.\n`,
+      messages: [],
+    });
+  }
+
+  const msgs = messages.results as any[];
+
+  if (format === 'json') {
+    return c.json({
+      date: dateParam || new Date().toISOString().split('T')[0],
+      messages: msgs,
+    });
+  }
+
+  // Format as markdown
+  let markdown = `# Daily Log - ${dateParam || new Date().toLocaleDateString()}\n\n`;
+  markdown += `*${msgs.length} message${msgs.length > 1 ? 's' : ''} recorded*\n\n---\n\n`;
+
+  let currentConversation = '';
+  for (const msg of msgs) {
+    if (msg.conversation_title !== currentConversation) {
+      if (currentConversation) markdown += '\n';
+      markdown += `## ${msg.conversation_title}\n\n`;
+      currentConversation = msg.conversation_title;
+    }
+
+    const time = new Date(msg.timestamp * 1000).toLocaleTimeString([], {
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+
+    if (msg.role === 'user') {
+      markdown += `### [${time}] You\n\n${msg.content}\n\n`;
+      if (msg.audio_url) {
+        markdown += `[🔊 Audio](${msg.audio_url})\n\n`;
+      }
+    } else {
+      markdown += `### [${time}] Makerlog\n\n${msg.content}\n\n`;
+    }
+  }
+
+  return c.json({
+    date: dateParam || new Date().toISOString().split('T')[0],
+    markdown,
+    messages: msgs,
+  });
+});
+
+/**
+ * GET /api/daily-log/dates
+ *
+ * List all dates that have recordings
+ */
+app.get('/api/daily-log/dates', async (c) => {
+  const userId = c.req.header('X-User-Id') || 'demo-user';
+
+  const dates = await c.env.DB.prepare(`
+    SELECT DISTINCT DATE(m.timestamp, 'unixepoch') as date, COUNT(*) as message_count
+    FROM messages m
+    JOIN conversations c ON m.conversation_id = c.id
+    WHERE c.user_id = ?
+    GROUP BY DATE(m.timestamp, 'unixepoch')
+    ORDER BY date DESC
+    LIMIT 365
+  `).bind(userId).all();
+
+  return c.json({
+    dates: (dates.results || []).map((d: any) => ({
+      date: d.date,
+      messageCount: d.message_count,
+    })),
+  });
+});
+
+/**
+ * PATCH /api/messages/:id
+ *
+ * Edit a message (e.g., correct transcription errors)
+ */
+app.patch('/api/messages/:id', async (c) => {
+  const messageId = c.req.param('id');
+  const userId = c.req.header('X-User-Id') || 'demo-user';
+  const { content } = await c.req.json() as { content: string };
+
+  if (!content) {
+    return c.json({ error: 'content is required' }, 400);
+  }
+
+  // Verify message belongs to user
+  const message = await c.env.DB.prepare(`
+    SELECT m.* FROM messages m
+    JOIN conversations c ON m.conversation_id = c.id
+    WHERE m.id = ? AND c.user_id = ?
+  `).bind(messageId, userId).first();
+
+  if (!message) {
+    return c.json({ error: 'Message not found' }, 404);
+  }
+
+  // Update message content
+  await c.env.DB.prepare(`
+    UPDATE messages SET content = ? WHERE id = ?
+  `).bind(content, messageId).run();
+
+  // Update Vectorize embedding if available
+  if (c.env.VECTORIZE && (message as any).role === 'user') {
+    try {
+      const embedding = await c.env.AI.run('@cf/baai/bge-base-en-v1.5', {
+        text: content,
+      }) as { data: number[][] };
+
+      await c.env.VECTORIZE.upsert([{
+        id: messageId,
+        values: embedding.data[0],
+        metadata: {
+          user_id: userId,
+          conversation_id: (message as any).conversation_id,
+          content: content.substring(0, 500),
+          timestamp: (message as any).timestamp,
+        },
+      }]);
+    } catch (e) {
+      console.error('Vectorize update error:', e);
+    }
+  }
+
+  return c.json({ success: true, message: { id: messageId, content } });
 });
 
 // ============ WEBSOCKET ENDPOINTS FOR DESKTOP CONNECTOR ============
