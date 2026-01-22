@@ -10,6 +10,7 @@
  */
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useNotifications } from './hooks/useNotifications';
 
 // Types
 interface Message {
@@ -1439,6 +1440,55 @@ function GamificationPanel() {
   );
 }
 
+// ============ NOTIFICATION PANEL ============
+
+function NotificationPanel() {
+  const {
+    notifications,
+    unreadCount,
+    markAsRead,
+    clearAll,
+  } = useNotifications();
+
+  return (
+    <div className="fixed top-4 right-4 z-50 space-y-2">
+      {notifications.slice(0, 5).map((notification) => (
+        <div
+          key={notification.id}
+          onClick={() => markAsRead(notification.id)}
+          className={`bg-slate-800 border rounded-lg p-4 shadow-lg max-w-sm transition-all cursor-pointer ${
+            notification.read
+              ? 'border-slate-700 opacity-60'
+              : 'border-blue-500 animate-slide-in'
+          }`}
+        >
+          <div className="flex items-start gap-3">
+            <span className="text-2xl">{notification.icon}</span>
+            <div className="flex-1">
+              <p className="text-sm font-medium text-white">{notification.title}</p>
+              <p className="text-xs text-slate-400 mt-1">{notification.message}</p>
+            </div>
+            {!notification.read && (
+              <div className="w-2 h-2 bg-blue-500 rounded-full"></div>
+            )}
+          </div>
+        </div>
+      ))}
+
+      {notifications.length > 5 && (
+        <div className="text-center">
+          <button
+            onClick={clearAll}
+            className="text-xs text-slate-500 hover:text-slate-300"
+          >
+            Clear all notifications
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ============ MAIN VOICE CHAT COMPONENT ============
 
 export default function VoiceChat() {
@@ -1458,6 +1508,7 @@ export default function VoiceChat() {
   const { isRecording, isProcessing, error, transcript, recordingState, startRecording, stopRecording, setTranscript } = useProgressiveRecorder();
   const { isSpeaking, speak, stop: stopSpeaking } = useSpeechSynthesis();
   const { screenshot, analyzing, analysis, analyzeScreenshot, clearScreenshot } = useScreenshotPaste();
+  const { notifications, unreadCount, requestPermission } = useNotifications();
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // Scroll to bottom when messages change
@@ -1649,8 +1700,19 @@ export default function VoiceChat() {
     setShowSearch(false);
   };
 
+  // Request notification permission on first interaction
+  useEffect(() => {
+    const handleInteraction = () => {
+      requestPermission();
+      document.removeEventListener('click', handleInteraction);
+    };
+    document.addEventListener('click', handleInteraction);
+    return () => document.removeEventListener('click', handleInteraction);
+  }, []);
+
   return (
-    <div className="flex h-screen bg-slate-900">
+    <React.Fragment>
+      <div className="flex h-screen bg-slate-900">
       {/* Sidebar */}
       <ConversationSidebar
         conversations={conversations}
@@ -1684,7 +1746,7 @@ export default function VoiceChat() {
                 setShowDailyLog(false);
                 setShowOpportunities(false);
               }}
-              className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition relative ${
                 showGamification
                   ? 'bg-yellow-500 text-white'
                   : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
@@ -1748,7 +1810,7 @@ export default function VoiceChat() {
                 setShowSearch(false);
                 setShowQuota(false);
               }}
-              className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition relative ${
                 showOpportunities
                   ? 'bg-green-500 text-white'
                   : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
@@ -1897,6 +1959,10 @@ export default function VoiceChat() {
           )}
         </div>
       </div>
+    </div>
+
+    {/* Notifications */}
+    <NotificationPanel />
     </div>
   );
 }
