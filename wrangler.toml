@@ -1,46 +1,6 @@
-# Cloudflare Pages configuration
+name = "makerlog-dashboard"
+compatibility_date = "2024-12-01"
 pages_build_output_dir = "dist"
 
-# Cloudflare Worker configuration
-name = "makerlog-worker"
-main = "workers/api/src/index.ts"
-compatibility_date = "2024-12-01"
-compatibility_flags = ["nodejs_compat"]
-
-# Custom domain for the API
-routes = [
-  { pattern = "api.makerlog.ai/*", zone_name = "makerlog.ai" }
-]
-
-# AI binding for all 9 Cloudflare AI models
-[ai]
-binding = "AI"
-
-# KV namespace for caching
-[[kv_namespaces]]
-binding = "KV"
-id = "cd2b23e7003d43f2afb9bf53c2cbbcb3"
-
-# R2 bucket for audio assets and generated content
-[[r2_buckets]]
-binding = "ASSETS"
-bucket_name = "makerlog-assets"
-
-# D1 database for all application data
-[[d1_databases]]
-binding = "DB"
-database_name = "makerlog-db"
-database_id = "e8540ce2-a898-4669-8afe-00fe04c1eb41"
-
-# Vectorize index for semantic search
-[[vectorize]]
-binding = "VECTORIZE"
-index_name = "makerlog-conversations"
-
-# Environment variables
 [vars]
-ENVIRONMENT = "production"
-ALLOWED_ORIGINS = "https://makerlog.ai,https://www.makerlog.ai"
-
-# Production settings
-env.production.vars = { ENVIRONMENT = "production" }
+VITE_API_URL = "https://makerlog-api-v2.casey-digennaro.workers.dev"

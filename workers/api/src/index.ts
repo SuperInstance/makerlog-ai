@@ -40,7 +40,7 @@ import { randomUUID } from 'crypto';
 interface Env {
   DB: D1Database;
   KV: KVNamespace;
-  ASSETS: R2Bucket;
+  R2: R2Bucket;
   AI: Ai;
   VECTORIZE: VectorizeIndex;
   CF_API_TOKEN?: string;
@@ -77,7 +77,7 @@ const ACHIEVEMENTS = {
 const app = new Hono<{ Bindings: Env }>();
 
 app.use('*', cors({
-  origin: ['http://localhost:3000', 'https://makerlog.ai', 'https://www.makerlog.ai'],
+  origin: ['http://localhost:3000', 'https://makerlog.ai', 'https://www.makerlog.ai', 'https://makerlog-dashboard.pages.dev'],
   credentials: true,
 }));
 
@@ -88,7 +88,10 @@ app.get('/', (c) => c.json({ status: 'ok', service: 'makerlog-api', version: '1.
 
 app.get('/api/quota', async (c) => {
   const userId = c.req.header('X-User-Id') || 'demo-user';
-  
+
+  // Ensure user exists (fixes foreign key issues in subsequent queries)
+  await ensureUser(c.env, userId);
+
   // Check KV cache first (60s TTL)
   const cached = await c.env.KV.get(`quota:${userId}`, { type: 'json' }) as QuotaUsage | null;
   if (cached) {
@@ -133,7 +136,10 @@ app.get('/api/quota', async (c) => {
 app.get('/api/tasks', async (c) => {
   const userId = c.req.header('X-User-Id') || 'demo-user';
   const status = c.req.query('status');
-  
+
+  // Ensure user exists
+  await ensureUser(c.env, userId);
+
   let query = 'SELECT * FROM tasks WHERE user_id = ?';
   const params: string[] = [userId];
   
@@ -151,7 +157,10 @@ app.get('/api/tasks', async (c) => {
 app.post('/api/tasks', async (c) => {
   const userId = c.req.header('X-User-Id') || 'demo-user';
   const body = await c.req.json() as { type: string; prompt: string; priority?: number };
-  
+
+  // Ensure user exists before creating task (fixes foreign key constraint)
+  await ensureUser(c.env, userId);
+
   const task: Task = {
     id: crypto.randomUUID(),
     user_id: userId,
@@ -163,15 +172,27 @@ app.post('/api/tasks', async (c) => {
     created_at: Math.floor(Date.now() / 1000),
   };
 
-  await c.env.DB.prepare(`
-    INSERT INTO tasks (id, user_id, type, status, prompt, priority, cost_estimate, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-  `).bind(
-    task.id, task.user_id, task.type, task.status,
-    task.prompt, task.priority, task.cost_estimate, task.created_at
-  ).run();
+  try {
+    await c.env.DB.prepare(`
+      INSERT INTO tasks (id, user_id, type, status, prompt, priority, cost_estimate, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).bind(
+      task.id, task.user_id, task.type, task.status,
+      task.prompt, task.priority, task.cost_estimate, task.created_at
+    ).run();
 
-  return c.json({ task }, 201);
+    return c.json({ task }, 201);
+  } catch (error: any) {
+    // Better error handling for foreign key violations
+    if (error.message && error.message.includes('FOREIGN KEY')) {
+      return c.json({
+        error: 'User not found',
+        message: 'The specified user does not exist. Please create a user first.',
+        userId
+      }, 400);
+    }
+    throw error;
+  }
 });
 
 app.post('/api/tasks/:id/execute', async (c) => {
@@ -203,7 +224,7 @@ app.post('/api/tasks/:id/execute', async (c) => {
 
       // Store in R2
       const key = `images/${userId}/${taskId}.png`;
-      await c.env.ASSETS.put(key, response, {
+      await c.env.R2.put(key, response, {
         httpMetadata: { contentType: 'image/png' },
       });
       resultUrl = `/assets/${key}`;
@@ -217,7 +238,7 @@ app.post('/api/tasks/:id/execute', async (c) => {
 
       // Store result in R2
       const key = `text/${userId}/${taskId}.txt`;
-      await c.env.ASSETS.put(key, response.response, {
+      await c.env.R2.put(key, response.response, {
         httpMetadata: { contentType: 'text/plain' },
       });
       resultUrl = `/assets/${key}`;
@@ -250,7 +271,10 @@ app.post('/api/tasks/:id/execute', async (c) => {
 
 app.post('/api/harvest', async (c) => {
   const userId = c.req.header('X-User-Id') || 'demo-user';
-  
+
+  // Ensure user exists
+  await ensureUser(c.env, userId);
+
   // Get all queued tasks
   const queuedTasks = await c.env.DB.prepare(
     'SELECT * FROM tasks WHERE user_id = ? AND status = ? ORDER BY priority DESC, created_at ASC'
@@ -312,7 +336,10 @@ app.post('/api/harvest', async (c) => {
 
 app.get('/api/achievements', async (c) => {
   const userId = c.req.header('X-User-Id') || 'demo-user';
-  
+
+  // Ensure user exists
+  await ensureUser(c.env, userId);
+
   const unlocked = await c.env.DB.prepare(
     'SELECT * FROM achievements WHERE user_id = ? ORDER BY unlocked_at DESC'
   ).bind(userId).all();
@@ -356,11 +383,11 @@ app.get('/api/users/me', async (c) => {
   return c.json(user);
 });
 
-// ============ ASSETS ENDPOINT ============
+// ============ R2 ENDPOINT ============
 
 app.get('/assets/*', async (c) => {
   const key = c.req.path.replace('/assets/', '');
-  const object = await c.env.ASSETS.get(key);
+  const object = await c.env.R2.get(key);
   
   if (!object) {
     return c.json({ error: 'Asset not found' }, 404);
@@ -383,7 +410,40 @@ function getNextMidnightUTC(): string {
   return tomorrow.toISOString();
 }
 
+/**
+ * Ensure a user exists in the database.
+ * Creates the user if they don't exist yet.
+ * Returns the user ID.
+ */
+async function ensureUser(env: Env, userId: string): Promise<string> {
+  // Check if user exists
+  const user = await env.DB.prepare('SELECT id FROM users WHERE id = ?')
+    .bind(userId)
+    .first();
+
+  if (!user) {
+    // Create user with default values
+    const now = Math.floor(Date.now() / 1000);
+    await env.DB.prepare(`
+      INSERT INTO users (id, email, xp, level, streak_days, created_at, updated_at)
+      VALUES (?, ?, 0, 1, 0, ?, ?)
+    `).bind(
+      userId,
+      userId === 'demo-user' ? 'demo@example.com' : `${userId}@makerlog.ai`,
+      now,
+      now
+    ).run();
+
+    console.log(`Auto-created user: ${userId}`);
+  }
+
+  return userId;
+}
+
 async function awardXP(env: Env, userId: string, xp: number): Promise<void> {
+  // Ensure user exists first
+  await ensureUser(env, userId);
+
   await env.DB.prepare(`
     UPDATE users SET xp = xp + ? WHERE id = ?
   `).bind(xp, userId).run();
@@ -397,6 +457,9 @@ async function awardXP(env: Env, userId: string, xp: number): Promise<void> {
 }
 
 async function updateStreak(env: Env, userId: string): Promise<void> {
+  // Ensure user exists
+  await ensureUser(env, userId);
+
   const user = await env.DB.prepare(
     'SELECT last_harvest_at, streak_days FROM users WHERE id = ?'
   ).bind(userId).first() as { last_harvest_at: number; streak_days: number } | null;
@@ -512,7 +575,7 @@ app.post('/api/voice/upload-chunk', async (c) => {
   try {
     // Store chunk in R2 immediately
     const chunkKey = `voice-chunks/${userId}/${recordingId}/chunk-${chunkIndex}.webm`;
-    await c.env.ASSETS.put(chunkKey, await audioChunk.arrayBuffer(), {
+    await c.env.R2.put(chunkKey, await audioChunk.arrayBuffer(), {
       httpMetadata: { contentType: 'audio/webm' },
     });
 
@@ -561,6 +624,9 @@ app.post('/api/voice/finalize-recording', async (c) => {
     conversation_id?: string;
   };
 
+  // Ensure user exists
+  await ensureUser(c.env, userId);
+
   if (!body.recording_id) {
     return c.json({ error: 'recording_id is required' }, 400);
   }
@@ -589,7 +655,7 @@ app.post('/api/voice/finalize-recording', async (c) => {
     // Combine chunks into a single ArrayBuffer
     const chunks: ArrayBuffer[] = [];
     for (const key of chunkKeys) {
-      const chunk = await c.env.ASSETS.get(key);
+      const chunk = await c.env.R2.get(key);
       if (chunk) {
         chunks.push(await chunk.arrayBuffer());
       }
@@ -606,7 +672,7 @@ app.post('/api/voice/finalize-recording', async (c) => {
 
     // Clean up chunks from R2 and KV
     for (const key of chunkKeys) {
-      await c.env.ASSETS.delete(key);
+      await c.env.R2.delete(key);
     }
     for (let i = 0; i < chunkKeys.length; i++) {
       await c.env.KV.delete(`chunk:${body.recording_id}:${i}`);
@@ -642,7 +708,7 @@ app.post('/api/voice/finalize-recording', async (c) => {
 
     // Store combined audio in R2
     const audioKey = `voice/${userId}/${conversationId}/${Date.now()}.webm`;
-    await c.env.ASSETS.put(audioKey, combinedBuffer.buffer, {
+    await c.env.R2.put(audioKey, combinedBuffer.buffer, {
       httpMetadata: { contentType: 'audio/webm' },
     });
 
@@ -763,7 +829,10 @@ Respond naturally to the user's latest message. If you notice something that cou
  */
 app.post('/api/voice/transcribe', async (c) => {
   const userId = c.req.header('X-User-Id') || 'demo-user';
-  
+
+  // Ensure user exists before processing
+  await ensureUser(c.env, userId);
+
   const formData = await c.req.formData();
   const audioFile = formData.get('audio') as File;
   let conversationId = formData.get('conversation_id') as string;
@@ -797,7 +866,7 @@ app.post('/api/voice/transcribe', async (c) => {
 
   // 3. Store audio in R2
   const audioKey = `voice/${userId}/${conversationId}/${Date.now()}.webm`;
-  await c.env.ASSETS.put(audioKey, audioBuffer, {
+  await c.env.R2.put(audioKey, audioBuffer, {
     httpMetadata: { contentType: audioFile.type || 'audio/webm' },
   });
 
@@ -965,7 +1034,10 @@ Only include opportunities with confidence > 0.5.`;
 
 app.get('/api/conversations', async (c) => {
   const userId = c.req.header('X-User-Id') || 'demo-user';
-  
+
+  // Ensure user exists
+  await ensureUser(c.env, userId);
+
   const result = await c.env.DB.prepare(`
     SELECT * FROM conversations 
     WHERE user_id = ? 
@@ -1001,7 +1073,10 @@ app.get('/api/conversations/:id', async (c) => {
 app.post('/api/conversations', async (c) => {
   const userId = c.req.header('X-User-Id') || 'demo-user';
   const body = await c.req.json().catch(() => ({})) as { title?: string };
-  
+
+  // Ensure user exists
+  await ensureUser(c.env, userId);
+
   const conversationId = crypto.randomUUID();
   const now = Math.floor(Date.now() / 1000);
   
@@ -1058,6 +1133,9 @@ app.post('/api/opportunities/:id/queue', async (c) => {
   const opportunityId = c.req.param('id');
   const userId = c.req.header('X-User-Id') || 'demo-user';
 
+  // Ensure user exists
+  await ensureUser(c.env, userId);
+
   const opp = await c.env.DB.prepare(`
     SELECT o.* FROM opportunities o
     JOIN conversations c ON o.conversation_id = c.id
@@ -1110,6 +1188,9 @@ app.get('/api/digest', async (c) => {
   const userId = c.req.header('X-User-Id') || 'demo-user';
   const todayStart = Math.floor(new Date().setUTCHours(0, 0, 0, 0) / 1000);
 
+  // Ensure user exists
+  await ensureUser(c.env, userId);
+
   const conversations = await c.env.DB.prepare(`
     SELECT * FROM conversations 
     WHERE user_id = ? AND updated_at >= ?
@@ -1151,6 +1232,9 @@ app.get('/api/daily-log', async (c) => {
   const userId = c.req.header('X-User-Id') || 'demo-user';
   const dateParam = c.req.query('date');
   const format = c.req.query('format') || 'markdown';
+
+  // Ensure user exists
+  await ensureUser(c.env, userId);
 
   // Parse date or use today
   let targetDate: Date;
@@ -1231,6 +1315,9 @@ app.get('/api/daily-log', async (c) => {
  */
 app.get('/api/daily-log/dates', async (c) => {
   const userId = c.req.header('X-User-Id') || 'demo-user';
+
+  // Ensure user exists
+  await ensureUser(c.env, userId);
 
   const dates = await c.env.DB.prepare(`
     SELECT DISTINCT DATE(m.timestamp, 'unixepoch') as date, COUNT(*) as message_count
@@ -1418,7 +1505,7 @@ app.post('/api/generate/image', async (c) => {
     // Store in R2
     const imageId = crypto.randomUUID();
     const key = `generated-images/${userId}/${imageId}.png`;
-    await c.env.ASSETS.put(key, response, {
+    await c.env.R2.put(key, response, {
       httpMetadata: { contentType: 'image/png' },
     });
 
@@ -1548,7 +1635,7 @@ app.post('/api/analyze/image', async (c) => {
 
     // Store image temporarily in R2
     const tempKey = `temp-analysis/${userId}/${Date.now()}.${imageFile.name.split('.').pop()}`;
-    await c.env.ASSETS.put(tempKey, imageBuffer, {
+    await c.env.R2.put(tempKey, imageBuffer, {
       httpMetadata: { contentType: imageFile.type || 'image/png' },
     });
 
@@ -1565,7 +1652,7 @@ app.post('/api/analyze/image', async (c) => {
 
     // Clean up temp image after 5 minutes
     c.executionCtx.waitUntil(
-      setTimeout(() => c.env.ASSETS.delete(tempKey), 5 * 60 * 1000)
+      setTimeout(() => c.env.R2.delete(tempKey), 5 * 60 * 1000)
     );
 
     return c.json({

@@ -59,6 +59,22 @@ const ONBOARDING_STEPS: OnboardingStep[] = [
 export function Onboarding({ onComplete }: OnboardingProps) {
   const [currentStep, setCurrentStep] = useState(0);
 
+  // Handle keyboard navigation
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'ArrowRight' || e.key === 'Enter') {
+        nextStep();
+      } else if (e.key === 'ArrowLeft') {
+        prevStep();
+      } else if (e.key === 'Escape') {
+        skipOnboarding();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [currentStep]);
+
   const nextStep = () => {
     if (currentStep < ONBOARDING_STEPS.length - 1) {
       setCurrentStep(currentStep + 1);
@@ -85,24 +101,36 @@ export function Onboarding({ onComplete }: OnboardingProps) {
   const step = ONBOARDING_STEPS[currentStep];
 
   return (
-    <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
-      <div className="bg-slate-800 rounded-2xl max-w-lg w-full border border-slate-700 shadow-2xl">
+    <div
+      className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="onboarding-title"
+    >
+      <div className="bg-slate-800 rounded-2xl max-w-lg w-full border border-slate-700 shadow-2xl scale-in">
         {/* Progress Bar */}
-        <div className="h-1 bg-slate-700 rounded-t-2xl">
+        <div className="h-1 bg-slate-700 rounded-t-2xl overflow-hidden">
           <div
-            className="h-full bg-gradient-to-r from-blue-500 to-purple-500 transition-all duration-300"
+            className="h-full bg-gradient-to-r from-blue-500 to-purple-500 transition-all duration-500 ease-out"
             style={{ width: `${((currentStep + 1) / ONBOARDING_STEPS.length) * 100}%` }}
+            role="progressbar"
+            aria-valuenow={currentStep + 1}
+            aria-valuemin={1}
+            aria-valuemax={ONBOARDING_STEPS.length}
+            aria-label="Onboarding progress"
           />
         </div>
 
         {/* Content */}
         <div className="p-8 text-center">
-          <span className="text-6xl mb-4 block">{step.icon}</span>
-          <h2 className="text-2xl font-bold text-white mb-3">{step.title}</h2>
+          <span className="text-6xl mb-4 block" aria-hidden="true">{step.icon}</span>
+          <h2 id="onboarding-title" className="text-2xl font-bold text-white mb-3">
+            {step.title}
+          </h2>
           <p className="text-slate-300 mb-6">{step.content}</p>
 
           {/* Step Indicators */}
-          <div className="flex justify-center gap-2 mb-6">
+          <div className="flex justify-center gap-2 mb-6" aria-label="Step indicators">
             {ONBOARDING_STEPS.map((s, index) => (
               <div
                 key={s.id}
@@ -113,6 +141,7 @@ export function Onboarding({ onComplete }: OnboardingProps) {
                       ? 'bg-blue-500/50'
                       : 'bg-slate-600'
                 }`}
+                aria-current={index === currentStep ? 'step' : undefined}
               />
             ))}
           </div>
@@ -122,13 +151,15 @@ export function Onboarding({ onComplete }: OnboardingProps) {
             <button
               onClick={prevStep}
               disabled={currentStep === 0}
-              className="flex-1 px-4 py-3 rounded-lg text-sm font-medium transition disabled:opacity-50 disabled:cursor-not-allowed bg-slate-700 hover:bg-slate-600 text-white"
+              className="flex-1 px-4 py-3 rounded-lg text-sm font-medium transition disabled:opacity-50 disabled:cursor-not-allowed bg-slate-700 hover:bg-slate-600 text-white btn-press focus-ring min-h-[48px]"
+              aria-label="Go to previous step"
             >
               Back
             </button>
             <button
               onClick={nextStep}
-              className="flex-1 px-4 py-3 rounded-lg text-sm font-medium transition bg-blue-500 hover:bg-blue-400 text-white"
+              className="flex-1 px-4 py-3 rounded-lg text-sm font-medium transition bg-blue-500 hover:bg-blue-400 text-white btn-press focus-ring min-h-[48px]"
+              aria-label={currentStep < ONBOARDING_STEPS.length - 1 ? 'Go to next step' : 'Complete onboarding'}
             >
               {step.action || 'Next'}
             </button>
@@ -138,7 +169,7 @@ export function Onboarding({ onComplete }: OnboardingProps) {
           {currentStep > 0 && (
             <button
               onClick={skipOnboarding}
-              className="mt-4 text-xs text-slate-500 hover:text-slate-300"
+              className="mt-4 text-xs text-slate-500 hover:text-slate-300 underline btn-press focus-ring"
             >
               Skip tour
             </button>

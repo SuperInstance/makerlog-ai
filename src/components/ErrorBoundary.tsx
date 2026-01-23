@@ -44,6 +44,10 @@ export class ErrorBoundary extends Component<Props, State> {
     this.setState({ hasError: false, error: null });
   };
 
+  private handleReload = () => {
+    window.location.reload();
+  };
+
   public render() {
     if (this.state.hasError) {
       if (this.props.fallback) {
@@ -51,27 +55,45 @@ export class ErrorBoundary extends Component<Props, State> {
       }
 
       return (
-        <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4">
-          <div className="max-w-md w-full bg-slate-800 rounded-lg p-6 border border-red-500/50">
+        <div
+          className="min-h-screen bg-slate-900 flex items-center justify-center p-4"
+          role="alert"
+          aria-live="assertive"
+        >
+          <div className="max-w-md w-full bg-slate-800 rounded-lg p-6 border border-red-500/50 shadow-2xl fade-in">
             <div className="text-center">
-              <span className="text-6xl mb-4">😵</span>
+              <span className="text-6xl mb-4 block">😵</span>
               <h2 className="text-xl font-bold text-white mb-2">
                 Oops, something went wrong
               </h2>
               <p className="text-slate-400 mb-6">
                 An unexpected error occurred. Don't worry, your recordings are safe!
               </p>
-              <div className="bg-slate-900 rounded p-3 mb-4 text-left">
-                <p className="text-xs text-slate-500 font-mono">
-                  {this.state.error?.toString()}
-                </p>
+              {/* Uncomment to show error details in development */}
+              {/* {false && (
+                <details className="bg-slate-900 rounded p-3 mb-4 text-left">
+                  <summary className="text-xs text-slate-500 cursor-pointer hover:text-slate-400">
+                    Error details
+                  </summary>
+                  <pre className="text-xs text-red-400 font-mono mt-2 whitespace-pre-wrap break-all">
+                    {this.state.error?.toString()}
+                  </pre>
+                </details>
+              )} */}
+              <div className="flex gap-3">
+                <button
+                  onClick={this.handleReset}
+                  className="flex-1 bg-blue-500 hover:bg-blue-400 text-white px-6 py-2 rounded-lg transition btn-press focus-ring min-h-[44px]"
+                >
+                  Try Again
+                </button>
+                <button
+                  onClick={this.handleReload}
+                  className="flex-1 bg-slate-700 hover:bg-slate-600 text-white px-6 py-2 rounded-lg transition btn-press focus-ring min-h-[44px]"
+                >
+                  Reload Page
+                </button>
               </div>
-              <button
-                onClick={this.handleReset}
-                className="bg-blue-500 hover:bg-blue-400 text-white px-6 py-2 rounded-lg transition"
-              >
-                Try Again
-              </button>
             </div>
           </div>
         </div>

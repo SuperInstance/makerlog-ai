@@ -11,6 +11,7 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useNotifications } from './hooks/useNotifications';
+import { API_BASE } from './config/api';
 
 // Types
 interface Message {
@@ -42,7 +43,7 @@ interface Opportunity {
   status: string;
 }
 
-const API_BASE = '/api';
+// API_BASE is now imported from config/api.ts
 
 // ============ HOOKS ============
 
@@ -69,8 +70,6 @@ function useProgressiveRecorder() {
   const audioContextRef = useRef<AudioContext | null>(null);
   const recordingIdRef = useRef<string | null>(null);
   const chunkIndexRef = useRef(0);
-
-  const API_BASE = '/api';
 
   // Play beep tone for audio feedback
   const playBeep = useCallback((frequency: number, duration: number) => {
@@ -326,6 +325,106 @@ function useSpeechSynthesis() {
 
 // ============ COMPONENTS ============
 
+// Skeleton loader for messages
+function MessageSkeleton() {
+  return (
+    <div className="flex mb-4 fade-in">
+      <div className="max-w-[80%] w-64">
+        <div className="bg-slate-800 rounded-2xl px-4 py-3">
+          <div className="skeleton h-4 w-48 mb-2 rounded" />
+          <div className="skeleton h-4 w-32 rounded" />
+        </div>
+        <div className="skeleton h-3 w-16 mt-2 rounded" />
+      </div>
+    </div>
+  );
+}
+
+// Loading spinner component
+function LoadingSpinner({ size = 'md' }: { size?: 'sm' | 'md' | 'lg' }) {
+  const sizeClasses = {
+    sm: 'w-4 h-4',
+    md: 'w-6 h-6',
+    lg: 'w-8 h-8',
+  };
+
+  return (
+    <svg className={`animate-spin ${sizeClasses[size]}`} viewBox="0 0 24 24">
+      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+    </svg>
+  );
+}
+
+// Empty state component
+function EmptyState({
+  icon,
+  title,
+  description,
+  action,
+}: {
+  icon: string;
+  title: string;
+  description: string;
+  action?: { label: string; onClick: () => void };
+}) {
+  return (
+    <div className="flex flex-col items-center justify-center h-full text-center p-8 fade-in">
+      <span className="text-6xl mb-4">{icon}</span>
+      <h2 className="text-xl font-medium text-white mb-2">{title}</h2>
+      <p className="text-slate-500 max-w-md mb-6">{description}</p>
+      {action && (
+        <button
+          onClick={action.onClick}
+          className="px-6 py-2 bg-blue-500 hover:bg-blue-400 text-white rounded-lg btn-press focus-ring"
+        >
+          {action.label}
+        </button>
+      )}
+    </div>
+  );
+}
+
+// Error alert component
+function ErrorAlert({
+  message,
+  onRetry,
+  onDismiss,
+}: {
+  message: string;
+  onRetry?: () => void;
+  onDismiss?: () => void;
+}) {
+  return (
+    <div className="bg-red-500/10 border border-red-500/50 rounded-lg p-4 mb-4 fade-in">
+      <div className="flex items-start gap-3">
+        <span className="text-xl flex-shrink-0">⚠️</span>
+        <div className="flex-1">
+          <p className="text-red-400 font-medium">Something went wrong</p>
+          <p className="text-red-300/80 text-sm mt-1">{message}</p>
+        </div>
+        {onDismiss && (
+          <button
+            onClick={onDismiss}
+            className="text-red-400 hover:text-red-300 transition-colors"
+            aria-label="Dismiss error"
+          >
+            ✕
+          </button>
+        )}
+      </div>
+      {onRetry && (
+        <button
+          onClick={onRetry}
+          className="mt-3 text-sm text-red-400 hover:text-red-300 underline"
+        >
+          Try again
+        </button>
+      )}
+    </div>
+  );
+}
+
 function RecordButton({
   isRecording,
   isProcessing,
@@ -362,9 +461,11 @@ function RecordButton({
         onTouchStart={handleMouseDown}
         onTouchEnd={handleMouseUp}
         disabled={isProcessing}
+        aria-label={isRecording ? 'Release to stop recording' : isProcessing ? 'Processing...' : 'Hold to record'}
         className={`
           w-24 h-24 rounded-full flex items-center justify-center
           transition-all duration-200 select-none
+          min-w-[44px] min-h-[44px] touch-manipulation
           ${isRecording
             ? 'bg-red-500 scale-110 shadow-lg shadow-red-500/50 animate-pulse'
             : isProcessing
@@ -374,10 +475,7 @@ function RecordButton({
         `}
       >
         {isProcessing ? (
-          <svg className="w-8 h-8 animate-spin text-white" viewBox="0 0 24 24">
-            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-          </svg>
+          <LoadingSpinner size="lg" />
         ) : (
           <svg className="w-10 h-10 text-white" fill="currentColor" viewBox="0 0 24 24">
             <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z" />
@@ -386,8 +484,10 @@ function RecordButton({
         )}
       </button>
       {isRecording && duration > 0 && (
-        <div className="mt-3 px-3 py-1 bg-slate-800 rounded-full">
-          <span className="text-sm font-mono text-red-400">{formatDuration(duration)}</span>
+        <div className="mt-3 px-3 py-1 bg-slate-800 rounded-full fade-in">
+          <span className="text-sm font-mono text-red-400" aria-live="polite">
+            {formatDuration(duration)}
+          </span>
         </div>
       )}
     </div>
@@ -426,17 +526,17 @@ function MessageBubble({ message }: { message: Message }) {
   }, []);
 
   const isUser = message.role === 'user';
-  
+
   return (
-    <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} mb-4`}>
+    <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} mb-4 fade-in`}>
       <div
-        className={`max-w-[80%] rounded-2xl px-4 py-3 ${
+        className={`max-w-[80%] rounded-2xl px-4 py-3 shadow-lg ${
           isUser
             ? 'bg-blue-500 text-white rounded-br-md'
             : 'bg-slate-700 text-white rounded-bl-md'
         }`}
       >
-        <p className="text-sm leading-relaxed">{message.content}</p>
+        <p className="text-sm leading-relaxed break-words">{message.content}</p>
         <div className="flex items-center justify-between mt-2">
           <span className="text-xs opacity-60">
             {new Date(message.timestamp * 1000).toLocaleTimeString([], {
@@ -447,7 +547,8 @@ function MessageBubble({ message }: { message: Message }) {
           {message.audioUrl && (
             <button
               onClick={handlePlayAudio}
-              className="text-xs opacity-60 hover:opacity-100 ml-2 flex items-center gap-1"
+              className="text-xs opacity-60 hover:opacity-100 ml-2 flex items-center gap-1 btn-press focus-ring rounded px-1"
+              aria-label={isPlaying ? 'Pause audio' : 'Play audio'}
             >
               {isPlaying ? '⏸️' : '🔊'}
               {isPlaying && <span className="text-xs">Playing...</span>}
@@ -475,19 +576,19 @@ function ConversationSidebar({
       <div className="p-4 border-b border-slate-700">
         <button
           onClick={onNew}
-          className="w-full py-2 px-4 bg-blue-500 hover:bg-blue-400 rounded-lg text-white font-medium transition"
+          className="w-full py-2 px-4 bg-blue-500 hover:bg-blue-400 rounded-lg text-white font-medium transition btn-press focus-ring min-h-[44px]"
         >
           + New Conversation
         </button>
       </div>
-      <div className="flex-1 overflow-y-auto">
+      <div className="flex-1 overflow-y-auto scrollbar-thin">
         {conversations.map((conv) => (
           <button
             key={conv.id}
             onClick={() => onSelect(conv.id)}
-            className={`w-full text-left p-4 border-b border-slate-800 transition ${
+            className={`w-full text-left p-4 border-b border-slate-800 transition min-h-[56px] focus-ring rounded-none ${
               conv.id === currentId
-                ? 'bg-slate-800'
+                ? 'bg-slate-800 border-l-2 border-l-blue-500'
                 : 'hover:bg-slate-800/50'
             }`}
           >
@@ -495,14 +596,18 @@ function ConversationSidebar({
               {conv.title || 'Untitled'}
             </p>
             <p className="text-xs text-slate-500 mt-1">
-              {conv.messageCount} messages
+              {conv.messageCount} message{conv.messageCount !== 1 ? 's' : ''}
             </p>
           </button>
         ))}
         {conversations.length === 0 && (
-          <p className="p-4 text-slate-500 text-sm text-center">
-            No conversations yet
-          </p>
+          <div className="p-6 text-center fade-in">
+            <span className="text-3xl mb-2 block">💬</span>
+            <p className="text-slate-500 text-sm">No conversations yet</p>
+            <p className="text-slate-600 text-xs mt-1">
+              Start recording to create one
+            </p>
+          </div>
         )}
       </div>
     </div>
@@ -531,7 +636,7 @@ function OpportunityCard({
   };
 
   return (
-    <div className="bg-slate-800 rounded-lg p-4 mb-3">
+    <div className="bg-slate-800 rounded-lg p-4 mb-3 slide-in-right shadow-lg">
       <div className="flex items-start justify-between mb-2">
         <div className="flex items-center gap-2">
           <span className="text-xl">{typeIcons[opportunity.type]}</span>
@@ -539,18 +644,21 @@ function OpportunityCard({
             {opportunity.type} Generation
           </span>
         </div>
-        <span className="text-xs bg-green-500/20 text-green-400 px-2 py-1 rounded">
+        <span className="text-xs bg-green-500/20 text-green-400 px-2 py-1 rounded-full font-medium">
           {Math.round(opportunity.confidence * 100)}% match
         </span>
       </div>
 
       {isEditing ? (
-        <div className="mb-3">
+        <div className="mb-3 scale-in">
+          <label htmlFor="prompt-edit" className="sr-only">Edit prompt</label>
           <textarea
+            id="prompt-edit"
             value={editedPrompt}
             onChange={(e) => setEditedPrompt(e.target.value)}
-            className="w-full bg-slate-700 text-white text-sm rounded-lg p-3 border border-slate-600 focus:border-blue-500 outline-none resize-none"
+            className="w-full bg-slate-700 text-white text-sm rounded-lg p-3 border border-slate-600 focus:border-blue-500 focus:ring-2 focus:ring-blue-500 outline-none resize-none min-h-[80px]"
             rows={3}
+            autoFocus
           />
           <div className="flex gap-2 mt-2">
             <button
@@ -558,13 +666,13 @@ function OpportunityCard({
                 onRefine(editedPrompt);
                 setIsEditing(false);
               }}
-              className="text-xs bg-blue-500 text-white px-3 py-1 rounded"
+              className="flex-1 text-xs bg-blue-500 hover:bg-blue-400 text-white py-2 px-3 rounded transition btn-press focus-ring min-h-[44px]"
             >
               Save
             </button>
             <button
               onClick={() => setIsEditing(false)}
-              className="text-xs text-slate-400 px-3 py-1"
+              className="flex-1 text-xs bg-slate-700 hover:bg-slate-600 text-white py-2 px-3 rounded transition btn-press focus-ring min-h-[44px]"
             >
               Cancel
             </button>
@@ -579,19 +687,20 @@ function OpportunityCard({
       <div className="flex gap-2">
         <button
           onClick={onQueue}
-          className="flex-1 text-xs bg-green-500 hover:bg-green-400 text-white py-2 px-3 rounded transition"
+          className="flex-1 text-xs bg-green-500 hover:bg-green-400 text-white py-2 px-3 rounded transition btn-press focus-ring min-h-[44px] font-medium"
         >
           Queue for Tonight
         </button>
         <button
           onClick={() => setIsEditing(!isEditing)}
-          className="text-xs bg-slate-700 hover:bg-slate-600 text-white py-2 px-3 rounded transition"
+          className="flex-1 text-xs bg-slate-700 hover:bg-slate-600 text-white py-2 px-3 rounded transition btn-press focus-ring min-h-[44px]"
         >
           Refine
         </button>
         <button
           onClick={onReject}
-          className="text-xs text-slate-500 hover:text-slate-400 py-2 px-3 transition"
+          className="text-xs text-slate-500 hover:text-slate-400 py-2 px-3 transition btn-press focus-ring min-h-[44px] rounded"
+          aria-label="Skip opportunity"
         >
           Skip
         </button>
@@ -1585,13 +1694,14 @@ export default function VoiceChat() {
             {isSpeaking && (
               <button
                 onClick={stopSpeaking}
-                className="text-xs bg-slate-700 px-3 py-1 rounded text-slate-300"
+                className="text-xs bg-slate-700 px-3 py-1 rounded text-slate-300 btn-press focus-ring min-h-[36px]"
+                aria-label="Stop speaking"
               >
                 🔊 Stop
               </button>
             )}
           </div>
-          <div className="flex gap-2">
+          <div className="flex gap-2 overflow-x-auto">
             <button
               onClick={() => {
                 setShowGamification(!showGamification);
@@ -1600,7 +1710,8 @@ export default function VoiceChat() {
                 setShowDailyLog(false);
                 setShowOpportunities(false);
               }}
-              className={`px-4 py-2 rounded-lg text-sm font-medium transition relative ${
+              aria-pressed={showGamification}
+              className={`px-3 py-2 rounded-lg text-sm font-medium transition relative btn-press focus-ring min-h-[44px] whitespace-nowrap ${
                 showGamification
                   ? 'bg-yellow-500 text-white'
                   : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
@@ -1616,7 +1727,8 @@ export default function VoiceChat() {
                 setShowDailyLog(false);
                 setShowOpportunities(false);
               }}
-              className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
+              aria-pressed={showQuota}
+              className={`px-3 py-2 rounded-lg text-sm font-medium transition btn-press focus-ring min-h-[44px] whitespace-nowrap ${
                 showQuota
                   ? 'bg-orange-500 text-white'
                   : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
@@ -1632,7 +1744,8 @@ export default function VoiceChat() {
                 setShowDailyLog(false);
                 setShowOpportunities(false);
               }}
-              className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
+              aria-pressed={showSearch}
+              className={`px-3 py-2 rounded-lg text-sm font-medium transition btn-press focus-ring min-h-[44px] whitespace-nowrap ${
                 showSearch
                   ? 'bg-purple-500 text-white'
                   : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
@@ -1648,7 +1761,8 @@ export default function VoiceChat() {
                 setShowSearch(false);
                 setShowQuota(false);
               }}
-              className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
+              aria-pressed={showDailyLog}
+              className={`px-3 py-2 rounded-lg text-sm font-medium transition btn-press focus-ring min-h-[44px] whitespace-nowrap ${
                 showDailyLog
                   ? 'bg-blue-500 text-white'
                   : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
@@ -1664,13 +1778,19 @@ export default function VoiceChat() {
                 setShowSearch(false);
                 setShowQuota(false);
               }}
-              className={`px-4 py-2 rounded-lg text-sm font-medium transition relative ${
+              aria-pressed={showOpportunities}
+              className={`px-3 py-2 rounded-lg text-sm font-medium transition relative btn-press focus-ring min-h-[44px] whitespace-nowrap ${
                 showOpportunities
                   ? 'bg-green-500 text-white'
                   : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
               }`}
             >
-              ✨ Opportunities {opportunities.length > 0 && `(${opportunities.length})`}
+              ✨ Opportunities
+              {opportunities.length > 0 && (
+                <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center">
+                  {opportunities.length}
+                </span>
+              )}
             </button>
           </div>
         </header>
@@ -1678,27 +1798,41 @@ export default function VoiceChat() {
         <div className="flex-1 flex overflow-hidden">
           {/* Messages */}
           <div className="flex-1 flex flex-col">
-            <div className="flex-1 overflow-y-auto p-6">
-              {messages.length === 0 ? (
-                <div className="flex flex-col items-center justify-center h-full text-center">
-                  <span className="text-6xl mb-4">🎤</span>
-                  <h2 className="text-xl font-medium text-white mb-2">
-                    Hold to talk
-                  </h2>
-                  <p className="text-slate-500 max-w-md">
-                    Talk through your ideas. I'll listen, respond, and detect
-                    opportunities for overnight generation.
-                  </p>
-                </div>
+            <div className="flex-1 overflow-y-auto p-6 scrollbar-thin">
+              {isProcessing && messages.length === 0 ? (
+                <>
+                  <MessageSkeleton />
+                  <MessageSkeleton />
+                </>
+              ) : messages.length === 0 ? (
+                <EmptyState
+                  icon="🎤"
+                  title="Hold to talk"
+                  description="Talk through your ideas. I'll listen, respond, and detect opportunities for overnight generation."
+                />
               ) : (
                 <>
                   {messages.map((msg) => (
                     <MessageBubble key={msg.id} message={msg} />
                   ))}
+                  {isProcessing && <MessageSkeleton />}
                   <div ref={messagesEndRef} />
                 </>
               )}
             </div>
+
+            {/* Error State */}
+            {error && (
+              <div className="px-6 pb-2">
+                <ErrorAlert
+                  message={error}
+                  onDismiss={() => {
+                    // Clear error via transcript setter
+                    setTranscript(null);
+                  }}
+                />
+              </div>
+            )}
 
             {/* Record Button */}
             <div className="p-8 flex flex-col items-center">
@@ -1709,14 +1843,13 @@ export default function VoiceChat() {
                 onStart={handleRecordingStart}
                 onStop={handleRecordingStop}
               />
-              <p className="text-slate-500 text-sm mt-4">
-                {error || (
-                  isRecording
-                    ? 'Release to send'
-                    : isProcessing
-                      ? 'Processing...'
-                      : 'Hold to speak'
-                )}
+              <p className="text-slate-500 text-sm mt-4" role="status" aria-live="polite">
+                {error ? '' : isRecording
+                  ? 'Release to send'
+                  : isProcessing
+                    ? 'Processing...'
+                    : 'Hold to speak'
+                }
               </p>
             </div>
           </div>

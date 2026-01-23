@@ -1,9 +1,9 @@
-name = "makerlog-api"
+name = "makerlog-api-v2"
 main = "src/index.ts"
 compatibility_date = "2024-12-01"
 compatibility_flags = ["nodejs_compat"]
 
-# Route configuration (update with your domain)
+# Custom domain for the API (will be configured manually due to existing worker conflict)
 # routes = [
 #   { pattern = "api.makerlog.ai/*", zone_name = "makerlog.ai" }
 # ]
@@ -16,7 +16,7 @@ binding = "KV"
 id = "cd2b23e7003d43f2afb9bf53c2cbbcb3"  # makerlog-cache
 
 [[r2_buckets]]
-binding = "ASSETS"
+binding = "R2"
 bucket_name = "makerlog-assets"
 
 [[d1_databases]]
