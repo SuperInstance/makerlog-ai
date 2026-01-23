@@ -2,6 +2,13 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Performance: Use font-display: swap for faster text rendering */
+@layer base {
+  * {
+    font-display: swap;
+  }
+}
+
 /* Custom scrollbar for webkit browsers */
 @layer utilities {
   .scrollbar-thin::-webkit-scrollbar {
@@ -129,4 +136,627 @@ body {
     transition-duration: 150ms;
     transition-timing-function: ease-in-out;
   }
+}
+
+/* ============ ACCESSIBILITY ENHANCEMENTS ============ */
+
+/* Screen reader only content (WCAG 2.2 AAA) */
+@layer utilities {
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border-width: 0;
+  }
+
+  .not-sr-only {
+    position: static;
+    width: auto;
+    height: auto;
+    padding: 0;
+    margin: 0;
+    overflow: visible;
+    clip: auto;
+    white-space: normal;
+  }
+}
+
+/* High contrast mode support (WCAG 2.2 AAA) */
+@media (prefers-contrast: high) {
+  * {
+    border-color: currentColor !important;
+  }
+
+  .focus-ring {
+    @apply focus:outline-none focus:ring-4 focus:ring-white focus:ring-offset-0;
+  }
+
+  button,
+  a {
+    border: 2px solid currentColor;
+  }
+}
+
+/* Reduced motion support (WCAG 2.2 AAA) */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  .fade-in,
+  .slide-in-right,
+  .scale-in,
+  .toast-slide-down {
+    animation: none;
+  }
+}
+
+/* Enhanced focus indicators (WCAG 2.2 AAA - 3:1 contrast) */
+@layer utilities {
+  .focus-ring-enhanced {
+    @apply focus:outline-none focus:ring-4 focus:ring-blue-400 focus:ring-offset-4 focus:ring-offset-slate-900;
+  }
+
+  .focus-visible-ring {
+    @apply focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-blue-400 focus-visible:ring-offset-4 focus-visible:ring-offset-slate-900;
+  }
+
+  /* Remove default focus only when using custom focus indicators */
+  .focus-none-custom {
+    @apply focus:outline-none;
+  }
+}
+
+/* Keyboard focus indicators for interactive elements */
+@layer components {
+  button:focus-visible,
+  a:focus-visible,
+  [role="button"]:focus-visible,
+  [tabindex]:focus-visible {
+    @apply outline-none ring-4 ring-blue-400 ring-offset-4 ring-offset-slate-900;
+  }
+}
+
+/* Skip links (WCAG 2.2 AAA) */
+@layer components {
+  .skip-link {
+    @apply sr-only;
+
+    &:focus {
+      @apply not-sr-only fixed top-4 left-4 z-[100] bg-blue-500 text-white px-4 py-3 rounded-lg shadow-lg font-medium;
+    }
+  }
+}
+
+/* Landmark roles for semantic navigation */
+@layer utilities {
+  .landmark-main { role: main; }
+  .landmark-nav { role: navigation; }
+  .landmark-complementary { role: complementary; }
+  .landmark-banner { role: banner; }
+  .landmark-contentinfo { role: contentinfo; }
+  .landmark-search { role: search; }
+  .landmark-form { role: form; }
+}
+
+/* Heading hierarchy enforcement */
+h1 { font-size: 2.5rem; }
+h2 { font-size: 2rem; }
+h3 { font-size: 1.75rem; }
+h4 { font-size: 1.5rem; }
+h5 { font-size: 1.25rem; }
+h6 { font-size: 1rem; }
+
+/* Accessible form controls */
+@layer components {
+  .form-input {
+    @apply bg-slate-700 text-white rounded-lg px-4 py-2 border-2 border-slate-600;
+    @apply focus:border-blue-500 focus:ring-4 focus:ring-blue-400/50 focus:outline-none;
+    @apply disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .form-label {
+    @apply block text-sm font-medium text-slate-300 mb-2;
+  }
+
+  .form-error {
+    @apply text-red-400 text-sm mt-1;
+  }
+
+  .form-hint {
+    @apply text-slate-400 text-sm mt-1;
+  }
+}
+
+/* Accessible button states */
+@layer components {
+  .btn-accessible {
+    @apply min-h-[44px] min-w-[44px] px-6 py-3 rounded-lg font-medium;
+    @apply focus:outline-none focus:ring-4 focus:ring-blue-400/50;
+    @apply disabled:opacity-50 disabled:cursor-not-allowed;
+    @apply transition-colors;
+  }
+
+  .btn-primary {
+    @apply btn-accessible bg-blue-500 text-white hover:bg-blue-400;
+  }
+
+  .btn-secondary {
+    @apply btn-accessible bg-slate-700 text-white hover:bg-slate-600;
+  }
+
+  .btn-ghost {
+    @apply btn-accessible bg-transparent text-slate-300 hover:bg-slate-800;
+  }
+}
+
+/* Accessible modal/dialog */
+@layer components {
+  .modal-backdrop {
+    @apply fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4;
+  }
+
+  .modal-content {
+    @apply bg-slate-800 rounded-xl shadow-2xl max-w-lg w-full max-h-[90vh] overflow-y-auto;
+  }
+}
+
+/* Accessible alerts and notifications */
+@layer components {
+  .alert-info {
+    @apply bg-blue-500/10 border-2 border-blue-500/50 text-blue-400 rounded-lg p-4;
+  }
+
+  .alert-success {
+    @apply bg-green-500/10 border-2 border-green-500/50 text-green-400 rounded-lg p-4;
+  }
+
+  .alert-warning {
+    @apply bg-yellow-500/10 border-2 border-yellow-500/50 text-yellow-400 rounded-lg p-4;
+  }
+
+  .alert-error {
+    @apply bg-red-500/10 border-2 border-red-500/50 text-red-400 rounded-lg p-4;
+  }
+}
+
+/* Progress indicators */
+@layer components {
+  .progress-bar {
+    @apply w-full bg-slate-700 rounded-full h-4 overflow-hidden;
+  }
+
+  .progress-value {
+    @apply h-full bg-blue-500 transition-all duration-300;
+  }
+}
+
+/* Accessible tables */
+@layer components {
+  .table-accessible {
+    @apply w-full border-collapse;
+  }
+
+  .table-accessible th {
+    @apply bg-slate-800 text-white font-semibold text-left px-4 py-3 border-b-2 border-slate-700;
+  }
+
+  .table-accessible td {
+    @apply px-4 py-3 border-b border-slate-700 text-slate-300;
+  }
+
+  .table-accessible tr:focus-within {
+    @apply bg-slate-800/50;
+  }
+}
+
+/* Accessible tooltips */
+@layer utilities {
+  .tooltip {
+    @apply relative;
+  }
+
+  .tooltip-content {
+    @apply sr-only;
+
+    .tooltip:hover &,
+    .tooltip:focus & {
+      @apply not-sr-only absolute bottom-full left-1/2 -translate-x-1/2 mb-2;
+      @apply bg-slate-900 text-white text-sm px-3 py-2 rounded-lg whitespace-nowrap;
+      @apply z-50 shadow-lg;
+    }
+  }
+}
+
+/* ============ STREAMING ANIMATIONS ============ */
+
+/* Typewriter cursor animation */
+@keyframes blink {
+  0%, 50% {
+    opacity: 1;
+  }
+  51%, 100% {
+    opacity: 0;
+  }
+}
+
+.streaming-cursor {
+  display: inline-block;
+  width: 2px;
+  height: 1.2em;
+  background-color: currentColor;
+  margin-left: 2px;
+  animation: blink 1s step-end infinite;
+  vertical-align: text-bottom;
+}
+
+/* Fade-in animation for streaming tokens */
+@keyframes tokenFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.streaming-token {
+  animation: tokenFadeIn 0.15s ease-out;
+  display: inline;
+}
+
+/* Pulsing indicator for streaming state */
+@keyframes pulse-ring {
+  0% {
+    transform: scale(0.8);
+    opacity: 0.8;
+  }
+  50% {
+    transform: scale(1);
+    opacity: 0.4;
+  }
+  100% {
+    transform: scale(0.8);
+    opacity: 0.8;
+  }
+}
+
+.streaming-indicator {
+  animation: pulse-ring 2s ease-in-out infinite;
+}
+
+/* Smooth scroll for streaming content */
+.streaming-content {
+  scroll-behavior: smooth;
+}
+
+/* Progressive loading animation */
+@keyframes shimmer {
+  0% {
+    background-position: -1000px 0;
+  }
+  100% {
+    background-position: 1000px 0;
+  }
+}
+
+.streaming-shimmer {
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.05) 50%,
+    transparent 100%
+  );
+  background-size: 1000px 100%;
+  animation: shimmer 2s infinite;
+}
+
+/* ============ GAMIFICATION ANIMATIONS ============ */
+
+/* Additional slide animations */
+@keyframes slideInLeft {
+  from {
+    transform: translateX(-20px);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+@keyframes slideInUp {
+  from {
+    transform: translateY(20px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@keyframes slideInDown {
+  from {
+    transform: translateY(-20px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+/* Bounce animations */
+@keyframes bounceIn {
+  0% {
+    transform: scale(0);
+    opacity: 0;
+  }
+  50% {
+    transform: scale(1.1);
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+@keyframes scaleOut {
+  from {
+    transform: scale(1);
+    opacity: 1;
+  }
+  to {
+    transform: scale(0.95);
+    opacity: 0;
+  }
+}
+
+/* Shake animation for errors/warnings */
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-5px); }
+  75% { transform: translateX(5px); }
+}
+
+/* Pulse glow for important items */
+@keyframes pulseGlow {
+  0%, 100% {
+    box-shadow: 0 0 5px rgba(250, 204, 21, 0.3);
+  }
+  50% {
+    box-shadow: 0 0 20px rgba(250, 204, 21, 0.6);
+  }
+}
+
+/* Apply new animations to classes */
+@layer components {
+  .slide-in-left {
+    animation: slideInLeft 0.3s ease-out;
+  }
+
+  .slide-in-up {
+    animation: slideInUp 0.3s ease-out;
+  }
+
+  .slide-in-down {
+    animation: slideInDown 0.3s ease-out;
+  }
+
+  .bounce-in {
+    animation: bounceIn 0.5s ease-out;
+  }
+
+  .scale-out {
+    animation: scaleOut 0.2s ease-out;
+  }
+
+  .shake {
+    animation: shake 0.5s ease-in-out;
+  }
+
+  .pulse-glow {
+    animation: pulseGlow 2s ease-in-out infinite;
+  }
+
+  /* Shimmer effect for loading states */
+  .shimmer {
+    position: relative;
+    overflow: hidden;
+  }
+
+  .shimmer::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -100%;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.1), transparent);
+    animation: shimmerSlide 2s infinite;
+  }
+}
+
+@keyframes shimmerSlide {
+  0% { left: -100%; }
+  100% { left: 100%; }
+}
+
+/* Fire/heat effect for "on fire" states */
+@keyframes fireFlicker {
+  0%, 100% {
+    transform: scale(1) rotate(-2deg);
+    filter: brightness(1);
+  }
+  25% {
+    transform: scale(1.05) rotate(2deg);
+    filter: brightness(1.1);
+  }
+  50% {
+    transform: scale(0.95) rotate(-1deg);
+    filter: brightness(0.95);
+  }
+  75% {
+    transform: scale(1.02) rotate(1deg);
+    filter: brightness(1.05);
+  }
+}
+
+.fire-effect {
+  animation: fireFlicker 0.5s ease-in-out infinite;
+}
+
+/* Confetti fall animation */
+@keyframes confettiFall {
+  0% {
+    transform: translateY(0) rotate(0deg);
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(400px) rotate(720deg);
+    opacity: 0;
+  }
+}
+
+/* XP float animation */
+@keyframes floatUp {
+  0% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-80px) scale(1.3);
+  }
+}
+
+.xp-float {
+  animation: floatUp 1.5s ease-out forwards;
+}
+
+/* Level up celebration */
+@keyframes levelBurst {
+  0% {
+    transform: scale(0);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(2);
+    opacity: 0;
+  }
+}
+
+.level-burst {
+  animation: levelBurst 1s ease-out forwards;
+}
+
+/* Card flip for achievements */
+@keyframes cardFlip3d {
+  0% {
+    transform: rotateY(90deg) translateX(100%);
+    opacity: 0;
+  }
+  100% {
+    transform: rotateY(0) translateX(0);
+    opacity: 1;
+  }
+}
+
+.card-flip {
+  animation: cardFlip3d 0.4s ease-out forwards;
+  transform-style: preserve-3d;
+}
+
+/* ============ VOICE RECORDING ANIMATIONS ============ */
+
+/* Waveform bar animation for audio visualization */
+@keyframes waveform-pulse {
+  0%, 100% {
+    transform: scaleY(0.3);
+  }
+  50% {
+    transform: scaleY(1);
+  }
+}
+
+.waveform-bar {
+  animation: waveform-pulse 0.5s ease-in-out infinite;
+}
+
+/* Recording pulse ring animation */
+@keyframes recording-pulse {
+  0% {
+    transform: scale(1);
+    opacity: 0.8;
+  }
+  100% {
+    transform: scale(2);
+    opacity: 0;
+  }
+}
+
+.recording-ring {
+  animation: recording-pulse 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* Audio level indicator animation */
+@keyframes audio-level-rise {
+  0% {
+    height: 4px;
+  }
+  100% {
+    height: 16px;
+  }
+}
+
+.audio-level-bar {
+  transition: height 0.1s ease-out, background-color 0.15s ease-out;
+}
+
+/* Recording button glow effect */
+@keyframes recording-glow {
+  0%, 100% {
+    box-shadow: 0 0 20px rgba(239, 68, 68, 0.5);
+  }
+  50% {
+    box-shadow: 0 0 40px rgba(239, 68, 68, 0.8);
+  }
+}
+
+.recording-button-glow {
+  animation: recording-glow 2s ease-in-out infinite;
+}
+
+/* Smooth transition for recording states */
+.recording-state-transition {
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Waveform container fade in */
+@keyframes waveform-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.waveform-fade-in {
+  animation: waveform-fade-in 0.3s ease-out;
 }

@@ -1,16 +1,19 @@
 /**
  * Makerlog.ai - Voice Chat Interface
- * 
+ *
  * Primary interface for "vibe all day" workflow:
  * - Push-to-talk or continuous recording
  * - Real-time transcription display
  * - TTS for assistant responses
- * - Visual feedback for recording state
+ * - Enhanced visual feedback for recording state
+ * - Real-time audio waveform visualization
  * - Conversation history sidebar
  */
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useNotifications } from './hooks/useNotifications';
+import { useOfflineSync } from './hooks/useOfflineSync';
+import { OfflineStatusIndicator, OfflineBanner } from './components/OfflineStatusIndicator';
 import { API_BASE } from './config/api';
 
 // Types
@@ -26,6 +29,7 @@ interface RecordingState {
   isRecording: boolean;
   startedAt: number | null;
   duration: number; // in seconds
+  audioLevel: number; // 0-1, for visualization
 }
 
 interface Conversation {
@@ -33,6 +37,14 @@ interface Conversation {
   title: string;
   updatedAt: number;
   messageCount: number;
+}
+
+interface RecordingHistory {
+  id: string;
+  conversationId: string;
+  transcript: string;
+  audioUrl: string;
+  timestamp: number;
 }
 
 interface Opportunity {
@@ -48,8 +60,13 @@ interface Opportunity {
 // ============ HOOKS ============
 
 /**
- * Progressive recording hook that uploads chunks during recording.
- * This prevents data loss if the app crashes or loses connection.
+ * Enhanced progressive recording hook with audio visualization.
+ * Features:
+ * - Real-time audio waveform visualization
+ * - Audio level detection for visual feedback
+ * - Chunked uploads to prevent data loss
+ * - Wake lock to prevent screen sleep
+ * - Haptic feedback for better UX
  */
 function useProgressiveRecorder() {
   const [isRecording, setIsRecording] = useState(false);
@@ -59,8 +76,10 @@ function useProgressiveRecorder() {
     isRecording: false,
     startedAt: null,
     duration: 0,
+    audioLevel: 0,
   });
   const [transcript, setTranscript] = useState<string | null>(null);
+  const [waveformData, setWaveformData] = useState<number[]>([]);
 
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
@@ -68,6 +87,8 @@ function useProgressiveRecorder() {
   const durationIntervalRef = useRef<number | null>(null);
   const uploadIntervalRef = useRef<number | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const animationFrameRef = useRef<number | null>(null);
   const recordingIdRef = useRef<string | null>(null);
   const chunkIndexRef = useRef(0);
 
@@ -100,7 +121,57 @@ function useProgressiveRecorder() {
     }
   }, []);
 
-  // Upload a chunk to R2
+  // Update waveform visualization
+  const updateWaveform = useCallback(() => {
+    if (!analyserRef.current) return;
+
+    const bufferLength = analyserRef.current.frequencyBinCount;
+    const dataArray = new Uint8Array(bufferLength);
+    analyserRef.current.getByteFrequencyData(dataArray);
+
+    // Calculate audio level (RMS)
+    let sum = 0;
+    for (let i = 0; i < bufferLength; i++) {
+      sum += dataArray[i];
+    }
+    const average = sum / bufferLength;
+    const level = Math.min(average / 128, 1); // Normalize to 0-1
+
+    // Update audio level in recording state
+    setRecordingState((prev) => ({ ...prev, audioLevel: level }));
+
+    // Update waveform data (downsample for performance)
+    const downsampled = Array.from({ length: 32 }, (_, i) => {
+      const index = Math.floor((i / 32) * bufferLength);
+      return dataArray[index] / 255;
+    });
+    setWaveformData(downsampled);
+
+    // Continue animation loop
+    if (isRecording) {
+      animationFrameRef.current = requestAnimationFrame(updateWaveform);
+    }
+  }, [isRecording]);
+
+  // Setup audio analysis
+  const setupAudioAnalysis = useCallback((stream: MediaStream) => {
+    if (!audioContextRef.current) {
+      audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+    }
+
+    const source = audioContextRef.current.createMediaStreamSource(stream);
+    const analyser = audioContextRef.current.createAnalyser();
+    analyser.fftSize = 256;
+    analyser.smoothingTimeConstant = 0.8;
+
+    source.connect(analyser);
+    analyserRef.current = analyser;
+
+    // Start waveform visualization
+    updateWaveform();
+  }, [updateWaveform]);
+
+  // Upload a chunk to R2 (with offline fallback)
   const uploadChunk = useCallback(async (blob: Blob, isFinal: boolean = false) => {
     const recordingId = recordingIdRef.current;
     if (!recordingId) return;
@@ -119,10 +190,46 @@ function useProgressiveRecorder() {
       });
 
       if (!response.ok) {
-        console.error('Chunk upload failed:', await response.text());
+        throw new Error(`Upload failed: ${response.statusText}`);
       }
+
+      return true;
     } catch (err) {
-      console.error('Chunk upload error:', err);
+      console.error('Chunk upload error, will queue for offline sync:', err);
+
+      // Store in IndexedDB for later sync
+      try {
+        const { offlineStorage } = await import('./lib/offlineStorage');
+        await offlineStorage.init();
+
+        // Store the recording chunk
+        await offlineStorage.saveRecording({
+          id: `${recordingId}-${chunkIndex}`,
+          blob,
+          timestamp: Date.now(),
+          uploaded: false,
+          uploadAttempts: 0,
+        });
+
+        // Add to sync queue
+        await offlineStorage.addToQueue({
+          type: 'recording',
+          action: 'create',
+          data: {
+            blob,
+            recordingId,
+            chunkIndex,
+            isFinal,
+          },
+          error: err instanceof Error ? err.message : 'Unknown error',
+        });
+
+        console.log('Chunk queued for offline sync');
+        return false;
+      } catch (storageErr) {
+        console.error('Failed to queue for offline sync:', storageErr);
+        return false;
+      }
     }
   }, []);
 
@@ -158,6 +265,10 @@ function useProgressiveRecorder() {
   const startRecording = useCallback(async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+      // Setup audio analysis for waveform visualization
+      setupAudioAnalysis(stream);
+
       const mediaRecorder = new MediaRecorder(stream, {
         mimeType: 'audio/webm;codecs=opus',
       });
@@ -189,9 +300,11 @@ function useProgressiveRecorder() {
         isRecording: true,
         startedAt,
         duration: 0,
+        audioLevel: 0,
       });
       setError(null);
       setTranscript(null);
+      setWaveformData([]);
 
       // Play start beep (higher frequency)
       playBeep(800, 100);
@@ -226,13 +339,26 @@ function useProgressiveRecorder() {
       }, 10000);
 
     } catch (err) {
-      setError('Microphone access denied');
+      const errorMessage = err instanceof DOMException && err.name === 'NotAllowedError'
+        ? 'Microphone access denied. Please allow microphone access in your browser settings.'
+        : err instanceof DOMException && err.name === 'NotFoundError'
+        ? 'No microphone found. Please connect a microphone and try again.'
+        : 'Failed to start recording. Please try again.';
+      setError(errorMessage);
       console.error('Failed to start recording:', err);
+      // Clear error after 5 seconds
+      setTimeout(() => setError(null), 5000);
     }
-  }, [playBeep, triggerHaptic, uploadChunk]);
+  }, [playBeep, triggerHaptic, uploadChunk, setupAudioAnalysis]);
 
   const stopRecording = useCallback(async (conversationId?: string) => {
     if (mediaRecorderRef.current && isRecording) {
+      // Cancel waveform animation
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current);
+        animationFrameRef.current = null;
+      }
+
       // Stop the media recorder
       mediaRecorderRef.current.stop();
       setIsRecording(false);
@@ -240,7 +366,9 @@ function useProgressiveRecorder() {
         isRecording: false,
         startedAt: null,
         duration: 0,
+        audioLevel: 0,
       });
+      setWaveformData([]);
 
       // Clear intervals
       if (durationIntervalRef.current) {
@@ -272,6 +400,10 @@ function useProgressiveRecorder() {
       // Finalize recording
       if (recordingIdRef.current) {
         const result = await finalizeRecording(recordingIdRef.current, conversationId || null);
+        // Haptic feedback on successful transcription
+        if (result) {
+          triggerHaptic([10, 30, 10]);
+        }
         return result;
       }
     }
@@ -284,6 +416,7 @@ function useProgressiveRecorder() {
     error,
     transcript,
     recordingState,
+    waveformData,
     startRecording,
     stopRecording,
     setTranscript,
@@ -404,13 +537,13 @@ function ErrorAlert({
       <div className="flex items-start gap-3">
         <span className="text-xl flex-shrink-0">⚠️</span>
         <div className="flex-1">
-          <p className="text-red-400 font-medium">Something went wrong</p>
+          <p className="text-red-400 font-medium">Recording Error</p>
           <p className="text-red-300/80 text-sm mt-1">{message}</p>
         </div>
         {onDismiss && (
           <button
             onClick={onDismiss}
-            className="text-red-400 hover:text-red-300 transition-colors"
+            className="text-red-400 hover:text-red-300 transition-colors p-1 hover:bg-red-500/20 rounded"
             aria-label="Dismiss error"
           >
             ✕
@@ -420,9 +553,9 @@ function ErrorAlert({
       {onRetry && (
         <button
           onClick={onRetry}
-          className="mt-3 text-sm text-red-400 hover:text-red-300 underline"
+          className="mt-3 text-sm bg-red-500/20 hover:bg-red-500/30 text-red-400 px-4 py-2 rounded-lg transition btn-press focus-ring"
         >
-          Try again
+          Try Again
         </button>
       )}
     </div>
@@ -433,12 +566,16 @@ function RecordButton({
   isRecording,
   isProcessing,
   duration,
+  audioLevel,
+  waveformData,
   onStart,
   onStop,
 }: {
   isRecording: boolean;
   isProcessing: boolean;
   duration: number;
+  audioLevel: number;
+  waveformData: number[];
   onStart: () => void;
   onStop: () => void;
 }) {
@@ -459,6 +596,33 @@ function RecordButton({
 
   return (
     <div className="flex flex-col items-center">
+      {/* Pulsing ring animation during recording */}
+      {isRecording && (
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+          <div className="w-32 h-32 rounded-full bg-red-500/20 animate-ping absolute" />
+          <div className="w-28 h-28 rounded-full bg-red-500/30 animate-pulse absolute" style={{ animationDuration: '1s' }} />
+        </div>
+      )}
+
+      {/* Waveform visualization behind button */}
+      {isRecording && waveformData.length > 0 && (
+        <div className="absolute bottom-0 left-1/2 transform -translate-x-1/2 mb-32 pointer-events-none">
+          <div className="flex items-center gap-0.5 h-8">
+            {waveformData.map((value, index) => (
+              <div
+                key={index}
+                className="w-1 bg-red-400 rounded-full transition-all duration-75"
+                style={{
+                  height: `${Math.max(4, value * 32)}px`,
+                  opacity: 0.3 + (value * 0.7),
+                }}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Main record button */}
       <button
         onMouseDown={handleMouseDown}
         onMouseUp={handleMouseUp}
@@ -467,16 +631,21 @@ function RecordButton({
         disabled={isProcessing}
         aria-label={isRecording ? 'Release to stop recording' : isProcessing ? 'Processing...' : 'Hold to record'}
         className={`
-          w-24 h-24 rounded-full flex items-center justify-center
-          transition-all duration-200 select-none
+          relative w-24 h-24 rounded-full flex items-center justify-center
+          transition-all duration-200 select-none z-10
           min-w-[44px] min-h-[44px] touch-manipulation
           ${isRecording
-            ? 'bg-red-500 scale-110 shadow-lg shadow-red-500/50 animate-pulse'
+            ? 'bg-red-500 scale-110 shadow-lg shadow-red-500/50'
             : isProcessing
               ? 'bg-slate-600 cursor-not-allowed'
               : 'bg-blue-500 hover:bg-blue-400 hover:scale-105 active:scale-95'
           }
         `}
+        style={{
+          boxShadow: isRecording && audioLevel > 0.1
+            ? `0 0 ${20 + audioLevel * 30}px rgba(239, 68, 68, ${0.3 + audioLevel * 0.4})`
+            : undefined,
+        }}
       >
         {isProcessing ? (
           <LoadingSpinner size="lg" />
@@ -487,11 +656,27 @@ function RecordButton({
           </svg>
         )}
       </button>
+
+      {/* Recording info */}
       {isRecording && duration > 0 && (
-        <div className="mt-3 px-3 py-1 bg-slate-800 rounded-full fade-in">
-          <span className="text-sm font-mono text-red-400" aria-live="polite">
-            {formatDuration(duration)}
-          </span>
+        <div className="mt-3 flex flex-col items-center gap-2 fade-in">
+          <div className="flex items-center gap-2 px-3 py-1 bg-slate-800 rounded-full">
+            {/* Audio level indicator */}
+            <div className="flex gap-0.5 items-end h-4">
+              {[...Array(5)].map((_, i) => (
+                <div
+                  key={i}
+                  className={`w-1 rounded-full transition-all duration-100 ${
+                    audioLevel > (i + 1) * 0.15 ? 'bg-red-400' : 'bg-slate-600'
+                  }`}
+                  style={{ height: `${4 + i * 3}px` }}
+                />
+              ))}
+            </div>
+            <span className="text-sm font-mono text-red-400" aria-live="polite">
+              {formatDuration(duration)}
+            </span>
+          </div>
         </div>
       )}
     </div>
@@ -1470,12 +1655,16 @@ export default function VoiceChat() {
   const [showSearch, setShowSearch] = useState(false);
   const [showQuota, setShowQuota] = useState(false);
   const [showGamification, setShowGamification] = useState(false);
+  const [localError, setLocalError] = useState<string | null>(null);
+  const [showOfflineBanner, setShowOfflineBanner] = useState(true);
+  const [dismissedOfflineBanner, setDismissedOfflineBanner] = useState(false);
 
-  // Hooks - Using progressive recorder for chunked uploads
-  const { isRecording, isProcessing, error, transcript, recordingState, startRecording, stopRecording, setTranscript } = useProgressiveRecorder();
+  // Hooks - Using progressive recorder for chunked uploads with waveform
+  const { isRecording, isProcessing, error, transcript, recordingState, waveformData, startRecording, stopRecording, setTranscript } = useProgressiveRecorder();
   const { isSpeaking, speak, stop: stopSpeaking } = useSpeechSynthesis();
   const { screenshot, analyzing, analysis, analyzeScreenshot, clearScreenshot } = useScreenshotPaste();
   const { requestPermission } = useNotifications();
+  const { syncStatus, manualSync } = useOfflineSync();
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // Scroll to bottom when messages change
@@ -1802,7 +1991,25 @@ export default function VoiceChat() {
         <div className="flex-1 flex overflow-hidden">
           {/* Messages */}
           <div className="flex-1 flex flex-col">
+            {/* Offline Status Indicator */}
+            <OfflineStatusIndicator
+              isOnline={syncStatus.isOnline}
+              isSyncing={syncStatus.isSyncing}
+              pendingUploads={syncStatus.pendingUploads}
+              lastSyncTime={syncStatus.lastSyncTime}
+              syncError={syncStatus.syncError}
+              syncProgress={syncStatus.syncProgress}
+              onManualSync={manualSync}
+            />
+
             <div className="flex-1 overflow-y-auto p-6 scrollbar-thin">
+              {/* Offline Banner */}
+              {!syncStatus.isOnline && showOfflineBanner && !dismissedOfflineBanner && (
+                <div className="mb-4">
+                  <OfflineBanner onDismiss={() => setDismissedOfflineBanner(true)} />
+                </div>
+              )}
+
               {isProcessing && messages.length === 0 ? (
                 <>
                   <MessageSkeleton />
@@ -1826,24 +2033,26 @@ export default function VoiceChat() {
             </div>
 
             {/* Error State */}
-            {error && (
+            {(error || localError) && (
               <div className="px-6 pb-2">
                 <ErrorAlert
-                  message={error}
+                  message={error || localError || ''}
+                  onRetry={handleRecordingStart}
                   onDismiss={() => {
-                    // Clear error via transcript setter
-                    setTranscript(null);
+                    setLocalError(null);
                   }}
                 />
               </div>
             )}
 
             {/* Record Button */}
-            <div className="p-8 flex flex-col items-center">
+            <div className="p-8 flex flex-col items-center relative">
               <RecordButton
                 isRecording={isRecording}
                 isProcessing={isProcessing}
                 duration={recordingState.duration}
+                audioLevel={recordingState.audioLevel}
+                waveformData={waveformData}
                 onStart={handleRecordingStart}
                 onStop={handleRecordingStop}
               />
@@ -1851,7 +2060,7 @@ export default function VoiceChat() {
                 {error ? '' : isRecording
                   ? 'Release to send'
                   : isProcessing
-                    ? 'Processing...'
+                    ? 'Processing your recording...'
                     : 'Hold to speak'
                 }
               </p>

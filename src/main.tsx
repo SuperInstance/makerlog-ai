@@ -1,10 +1,24 @@
-import React, { useState } from 'react'
+import React, { useState, lazy, Suspense } from 'react'
 import ReactDOM from 'react-dom/client'
-import VoiceChat from './VoiceChat'
-import Dashboard from './Dashboard'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { Onboarding, useOnboarding } from './components/Onboarding'
 import './index.css'
+
+// Lazy load route components for code splitting
+const VoiceChat = lazy(() => import('./VoiceChat'))
+const Dashboard = lazy(() => import('./Dashboard'))
+
+// Loading component for lazy-loaded routes
+function PageLoader() {
+  return (
+    <div className="min-h-screen bg-slate-900 flex items-center justify-center">
+      <div className="text-center">
+        <div className="inline-block animate-spin rounded-full h-12 w-12 border-4 border-solid border-blue-500 border-t-transparent"></div>
+        <p className="mt-4 text-slate-400">Loading...</p>
+      </div>
+    </div>
+  );
+}
 
 function App() {
   const [view, setView] = useState<'voice' | 'dashboard'>('voice');
@@ -41,8 +55,10 @@ function App() {
           </button>
         </nav>
 
-        {/* Views */}
-        {view === 'voice' ? <VoiceChat /> : <Dashboard />}
+        {/* Views with lazy loading and suspense */}
+        <Suspense fallback={<PageLoader />}>
+          {view === 'voice' ? <VoiceChat /> : <Dashboard />}
+        </Suspense>
       </div>
     </ErrorBoundary>
   );

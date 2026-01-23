@@ -818,9 +818,265 @@ Respond naturally to the user's latest message. If you notice something that cou
 });
 
 /**
+ * POST /api/voice/transcribe-stream
+ *
+ * Streaming version of voice transcribe with SSE:
+ * 1. Accepts audio blob from push-to-talk
+ * 2. Transcribes with Whisper
+ * 3. Stores in conversation + vector DB
+ * 4. Streams AI response token-by-token
+ * 5. Detects generative opportunities
+ */
+app.post('/api/voice/transcribe-stream', async (c) => {
+  const userId = c.req.header('X-User-Id') || 'demo-user';
+
+  // Ensure user exists before processing
+  await ensureUser(c.env, userId);
+
+  const formData = await c.req.formData();
+  const audioFile = formData.get('audio') as File;
+  let conversationId = formData.get('conversation_id') as string;
+
+  if (!audioFile) {
+    return c.json({ error: 'No audio file provided' }, 400);
+  }
+
+  // Set up SSE headers
+  c.header('Content-Type', 'text/event-stream');
+  c.header('Cache-Control', 'no-cache');
+  c.header('Connection', 'keep-alive');
+
+  // Create a readable stream for SSE
+  const stream = new ReadableStream({
+    async start(controller) {
+      const encoder = new TextEncoder();
+
+      const sendEvent = (event: string, data: any) => {
+        const message = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+        controller.enqueue(encoder.encode(message));
+      };
+
+      try {
+        // Send start event
+        sendEvent('start', { status: 'processing' });
+
+        const audioBuffer = await audioFile.arrayBuffer();
+
+        // 1. Transcribe with Whisper
+        sendEvent('status', { step: 'transcribing', message: 'Transcribing audio...' });
+        const transcription = await c.env.AI.run('@cf/openai/whisper', {
+          audio: [...new Uint8Array(audioBuffer)],
+        }) as { text: string };
+
+        const transcript = transcription.text.trim();
+
+        if (!transcript) {
+          sendEvent('error', { error: 'Could not transcribe audio' });
+          controller.close();
+          return;
+        }
+
+        // Send transcript
+        sendEvent('transcript', { transcript });
+
+        // 2. Create conversation if needed
+        if (!conversationId) {
+          conversationId = crypto.randomUUID();
+          const now = Math.floor(Date.now() / 1000);
+          await c.env.DB.prepare(`
+            INSERT INTO conversations (id, user_id, title, created_at, updated_at, message_count)
+            VALUES (?, ?, ?, ?, ?, 0)
+          `).bind(conversationId, userId, `Conversation ${new Date().toLocaleDateString()}`, now, now).run();
+        }
+
+        // 3. Store audio in R2
+        const audioKey = `voice/${userId}/${conversationId}/${Date.now()}.webm`;
+        await c.env.R2.put(audioKey, audioBuffer, {
+          httpMetadata: { contentType: audioFile.type || 'audio/webm' },
+        });
+
+        // 4. Create message record
+        const messageId = crypto.randomUUID();
+        const timestamp = Math.floor(Date.now() / 1000);
+
+        await c.env.DB.prepare(`
+          INSERT INTO messages (id, conversation_id, role, content, audio_url, timestamp)
+          VALUES (?, ?, 'user', ?, ?, ?)
+        `).bind(messageId, conversationId, transcript, `/assets/${audioKey}`, timestamp).run();
+
+        // 5. Generate embedding and store in Vectorize (if available)
+        try {
+          const embedding = await c.env.AI.run('@cf/baai/bge-base-en-v1.5', {
+            text: transcript,
+          }) as { data: number[][] };
+
+          if (c.env.VECTORIZE) {
+            await c.env.VECTORIZE.upsert([{
+              id: messageId,
+              values: embedding.data[0],
+              metadata: {
+                user_id: userId,
+                conversation_id: conversationId,
+                content: transcript.substring(0, 500),
+                timestamp,
+              },
+            }]);
+          }
+        } catch (e) {
+          console.error('Vectorize error:', e);
+        }
+
+        // 6. Update conversation
+        await c.env.DB.prepare(`
+          UPDATE conversations SET updated_at = ?, message_count = message_count + 1
+          WHERE id = ?
+        `).bind(timestamp, conversationId).run();
+
+        // 7. Get recent context for response
+        const recentMessages = await c.env.DB.prepare(`
+          SELECT role, content FROM messages
+          WHERE conversation_id = ?
+          ORDER BY timestamp DESC
+          LIMIT 5
+        `).bind(conversationId).all();
+
+        const context = (recentMessages.results || [])
+          .reverse()
+          .map((m: any) => `${m.role}: ${m.content}`)
+          .join('\n');
+
+        // 8. Generate streaming response
+        sendEvent('status', { step: 'generating', message: 'AI is thinking...' });
+
+        const systemPrompt = `You are Makerlog, a friendly AI assistant that helps makers think through their ideas.
+
+Your role is to:
+- Listen actively and ask clarifying questions
+- Help users articulate their ideas more clearly
+- Identify potential generative tasks (images, code, text) that could help
+- Keep responses concise and conversational (this is voice chat)
+
+Recent conversation:
+${context}
+
+Respond naturally to the user's latest message. If you notice something that could be generated (icon, code snippet, copy, etc.), mention it briefly.`;
+
+        // Generate response with streaming
+        const aiResponse = await c.env.AI.run('@cf/meta/llama-3.1-8b-instruct', {
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: transcript },
+          ],
+          max_tokens: 300,
+          stream: true,
+        });
+
+        // Handle streaming response
+        const reader = (aiResponse as any).body?.getReader();
+        if (reader) {
+          const decoder = new TextDecoder();
+          let fullResponse = '';
+
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            const chunk = decoder.decode(value, { stream: true });
+            const lines = chunk.split('\n').filter(line => line.trim() !== '');
+
+            for (const line of lines) {
+              if (line.startsWith('data: ')) {
+                const data = line.slice(6);
+                if (data === '[DONE]') continue;
+
+                try {
+                  const parsed = JSON.parse(data);
+                  const token = parsed.choices?.[0]?.delta?.content || '';
+                  if (token) {
+                    fullResponse += token;
+                    sendEvent('token', { token, fullResponse });
+                  }
+                } catch (e) {
+                  // Skip invalid JSON
+                }
+              }
+            }
+          }
+
+          // Store complete assistant response
+          const assistantMessageId = crypto.randomUUID();
+          await c.env.DB.prepare(`
+            INSERT INTO messages (id, conversation_id, role, content, timestamp)
+            VALUES (?, ?, 'assistant', ?, ?)
+          `).bind(assistantMessageId, conversationId, fullResponse, Math.floor(Date.now() / 1000)).run();
+
+          // Send completion event
+          sendEvent('complete', {
+            response: fullResponse,
+            conversationId,
+            messageId: assistantMessageId,
+            audioUrl: `/assets/${audioKey}`,
+          });
+
+          // Analyze for opportunities (async)
+          c.executionCtx.waitUntil(
+            analyzeForOpportunities(c.env, conversationId, messageId, transcript)
+          );
+        } else {
+          // Fallback if streaming not available
+          const aiResponse = await c.env.AI.run('@cf/meta/llama-3.1-8b-instruct', {
+            messages: [
+              { role: 'system', content: systemPrompt },
+              { role: 'user', content: transcript },
+            ],
+            max_tokens: 300,
+          }) as { response: string };
+
+          const response = aiResponse.response;
+
+          // Store assistant response
+          const assistantMessageId = crypto.randomUUID();
+          await c.env.DB.prepare(`
+            INSERT INTO messages (id, conversation_id, role, content, timestamp)
+            VALUES (?, ?, 'assistant', ?, ?)
+          `).bind(assistantMessageId, conversationId, response, Math.floor(Date.now() / 1000)).run();
+
+          // Send complete response as single chunk
+          sendEvent('complete', {
+            response,
+            conversationId,
+            messageId: assistantMessageId,
+            audioUrl: `/assets/${audioKey}`,
+          });
+
+          // Analyze for opportunities (async)
+          c.executionCtx.waitUntil(
+            analyzeForOpportunities(c.env, conversationId, messageId, transcript)
+          );
+        }
+
+        controller.close();
+      } catch (error) {
+        console.error('Streaming transcribe failed:', error);
+        sendEvent('error', { error: 'Failed to process voice input' });
+        controller.close();
+      }
+    },
+  });
+
+  return new Response(stream, {
+    headers: {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+    },
+  });
+});
+
+/**
  * POST /api/voice/transcribe
- * 
- * The core voice-first interaction:
+ *
+ * The core voice-first interaction (non-streaming):
  * 1. Accepts audio blob from push-to-talk
  * 2. Transcribes with Whisper
  * 3. Stores in conversation + vector DB

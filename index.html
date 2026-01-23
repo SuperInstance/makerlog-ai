@@ -4,13 +4,24 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <meta name="theme-color" content="#3b82f6" />
+    <meta name="theme-color" content="#0f172a" />
     <meta name="description" content="Voice-first development assistant. Talk through your day. Wake up to results." />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="Makerlog" />
     <link rel="apple-touch-icon" href="/icon-192.png" />
     <link rel="manifest" href="/manifest.json" />
+
+    <!-- Performance: Preconnect to API domain -->
+    <link rel="preconnect" href="https://makerlog-dashboard.pages.dev" />
+    <link rel="dns-prefetch" href="https://makerlog-dashboard.pages.dev" />
+
+    <!-- Performance: Preload critical fonts -->
+    <link rel="preload" as="font" type="font/woff2" crossorigin />
+
+    <!-- Performance: Preload main script -->
+    <link rel="modulepreload" href="/src/main.tsx" />
+
     <title>Makerlog.ai - Voice-First Development Assistant</title>
   </head>
   <body>
