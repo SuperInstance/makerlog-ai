@@ -175,12 +175,9 @@ function useProgressiveRecorder() {
         }
       };
 
-      mediaRecorder.onstop = async () => {
-        // Upload remaining chunks as final
-        if (chunksRef.current.length > 0) {
-          const finalBlob = new Blob(chunksRef.current, { type: 'audio/webm' });
-          await uploadChunk(finalBlob, true);
-        }
+      mediaRecorder.onstop = () => {
+        // Note: Final chunk upload is now handled in stopRecording()
+        // This is called after we've already uploaded the final chunk
         stream.getTracks().forEach((track) => track.stop());
       };
 
@@ -236,6 +233,7 @@ function useProgressiveRecorder() {
 
   const stopRecording = useCallback(async (conversationId?: string) => {
     if (mediaRecorderRef.current && isRecording) {
+      // Stop the media recorder
       mediaRecorderRef.current.stop();
       setIsRecording(false);
       setRecordingState({
@@ -265,6 +263,12 @@ function useProgressiveRecorder() {
       // Haptic feedback for stop
       triggerHaptic([20, 50, 20]);
 
+      // Upload final chunk synchronously (important: must await this)
+      if (chunksRef.current.length > 0 && recordingIdRef.current) {
+        const finalBlob = new Blob(chunksRef.current, { type: 'audio/webm' });
+        await uploadChunk(finalBlob, true);
+      }
+
       // Finalize recording
       if (recordingIdRef.current) {
         const result = await finalizeRecording(recordingIdRef.current, conversationId || null);
@@ -272,7 +276,7 @@ function useProgressiveRecorder() {
       }
     }
     return null;
-  }, [isRecording, playBeep, triggerHaptic, finalizeRecording]);
+  }, [isRecording, playBeep, triggerHaptic, uploadChunk, finalizeRecording]);
 
   return {
     isRecording,
